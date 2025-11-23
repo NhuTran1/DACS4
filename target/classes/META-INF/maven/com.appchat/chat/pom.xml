@@ -80,7 +80,7 @@
                 <artifactId>javafx-maven-plugin</artifactId>
                 <version>0.0.8</version>
                 <configuration>
-                    <mainClass>com.chat.Main</mainClass>
+                    <mainClass>view.HelloFX</mainClass>
                 </configuration>
             </plugin>
         </plugins>

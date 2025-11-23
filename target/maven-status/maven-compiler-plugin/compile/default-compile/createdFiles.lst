@@ -1,0 +1,16 @@
+dao\ConversationDao.class
+model\Conversation.class
+dao\UserDao.class
+model\Conversation$ConversationType.class
+model\Friend.class
+model\Message.class
+config\AppConfig.class
+view\HelloFX.class
+Main.class
+model\MessageSeen.class
+model\Users.class
+config\HibernateUtil.class
+model\FriendRequest.class
+model\Participant.class
+dao\FriendDao.class
+model\UnreadCount.class

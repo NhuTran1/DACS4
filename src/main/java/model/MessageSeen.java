@@ -28,5 +28,7 @@ public class MessageSeen {
 
     @Column(name = "seen_at", nullable = false)
     private LocalDateTime seenAt;
+    
+    
 }
 
