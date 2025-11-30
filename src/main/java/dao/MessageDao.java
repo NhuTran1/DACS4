@@ -46,33 +46,49 @@ public class MessageDao {
 	
 	//Đánh dấu tin nhắn đã đọc cho 1 user
 	public void markMessageSeen(Long messageId, Long userId) {
-		Transaction tx = null;
-		
-		try(Session session = HibernateUtil.getSessionFactory().openSession()){
-			tx = session.beginTransaction();
-			
-			//Kiem tra co reacord chua
-			String checkSql = """
-					SELECT COUNT(*) 
-					FROM message_seen
-					WHERE message_id = :mid AND user_id = :uid
-					""";
-			Query<?> checkQuery = session.createNativeQuery(checkSql);
-			checkQuery.setParameter("mid", messageId);
-			checkQuery.setParameter("uid", userId);
-			
-			Number count = (Number) checkQuery.getSingleResult();
-			if(count.intValue() == 0) {
-				//insert moi
-				MessageSeen seen = new MessageSeen();
-				seen.setMessage(session.get(Message.class, messageId));
-				seen.setUser(session.get(Users.class, userId));
-				
-				tx.commit();
-				session.save(seen);
-			}
-		}
+	    Transaction tx = null;
+
+	    try (Session session = HibernateUtil.getSessionFactory().openSession()) {
+	        tx = session.beginTransaction();
+
+	        String checkSql = """
+	                SELECT COUNT(*)
+	                FROM message_seen
+	                WHERE message_id = :mid AND user_id = :uid
+	                """;
+
+	        Query<?> checkQuery = session.createNativeQuery(checkSql);
+	        checkQuery.setParameter("mid", messageId);
+	        checkQuery.setParameter("uid", userId);
+
+	        Number count = (Number) checkQuery.getSingleResult();
+
+	        if (count.intValue() == 0) {
+	            MessageSeen seen = new MessageSeen();
+	            seen.setMessage(session.get(Message.class, messageId));
+	            seen.setUser(session.get(Users.class, userId));
+
+	            session.save(seen); // Lưu đúng chỗ
+	        }
+
+	        tx.commit();
+
+	    } catch (Exception e) {
+	        if (tx != null) tx.rollback();
+	        e.printStackTrace();
+	    }
 	}
+
+	// Lấy message theo id
+	public Message getMessageById(Long messageId) {
+	    try (Session session = HibernateUtil.getSessionFactory().openSession()) {
+	        return session.get(Message.class, messageId);
+	    } catch (Exception e) {
+	        e.printStackTrace();
+	        return null;
+	    }
+	}
+
 	
 	//Reset số tn chưa đọc trong conversation
 	public void resetUnread(Long conversationId, Long userId) {

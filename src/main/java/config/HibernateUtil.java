@@ -11,7 +11,7 @@ import org.hibernate.HibernateException;
  */
 public class HibernateUtil {
 
-    private static final SessionFactory sessionFactory;
+    private static final SessionFactory sessionFactory ;
 
     static {
         try {
@@ -40,12 +40,22 @@ public class HibernateUtil {
             config.addAnnotatedClass(model.Message.class);
             config.addAnnotatedClass(model.MessageSeen.class);
             config.addAnnotatedClass(model.UnreadCount.class);
+            config.addAnnotatedClass(model.UserSession.class);
 
             // Build SessionFactory
             sessionFactory = config.buildSessionFactory();
             System.out.println("Hibernate SessionFactory created successfully (AppConfig version).");
 
         } catch (HibernateException ex) {
+            System.err.println("Initial SessionFactory creation failed." + ex);
+            throw new ExceptionInInitializerError(ex);
+        }
+    }
+
+    private static SessionFactory buildSessionFactory() {
+        try {
+            return new Configuration().configure().buildSessionFactory();
+        } catch (Throwable ex) {
             System.err.println("Initial SessionFactory creation failed." + ex);
             throw new ExceptionInInitializerError(ex);
         }
