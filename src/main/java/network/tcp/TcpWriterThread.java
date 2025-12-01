@@ -1,30 +1,27 @@
 package network.tcp;
 
-import java.util.concurrent.BlockingDeque;
-import java.util.concurrent.LinkedBlockingDeque;
+import java.io.PrintWriter;
+import java.util.concurrent.BlockingQueue;
 
-public class TcpWriterThread extends Thread{
-	private final TcpConnection connection;
-	private final BlockingDeque<String> queue = new LinkedBlockingDeque<String>();
-	
-	public TcpWriterThread(TcpConnection connection) {
-        this.connection = connection;
+public class TcpWriterThread implements Runnable {
+    private final BlockingQueue<String> outbound;
+    private final PrintWriter out;
+
+    public TcpWriterThread(BlockingQueue<String> outbound, PrintWriter out) {
+        this.outbound = outbound;
+        this.out = out;
     }
 
-    public void send(String message) {
-        queue.offer(message);
-    }
-    
     @Override
     public void run() {
-    	try {
-    		while (!Thread.currentThread().isInterrupted()) {
-    			String msg = queue.take();
-    			connection.send(msg);
-    		}
-    	}catch (Exception ignored) {
-        } finally {
-            connection.close();
-        }
+        try {
+            while (true) {
+                String msg = outbound.take();
+                synchronized (out) {
+                    out.println(msg);
+                    out.flush();
+                }
+            }
+        } catch (InterruptedException ignored) {}
     }
 }

@@ -42,39 +42,5 @@ public class UserSession {
     @Column(name = "expired_at")
     private Date expiredAt;
     
- // Getter & Setter
-//    public Integer getId() {
-//        return id;
-//    }
-//    public void setId(Integer id) {
-//        this.id = id;
-//    }
-//
-//    public Integer getUserId() {
-//        return userId;
-//    }
-//    public void setUserId(Integer integer) {
-//        this.userId = integer;
-//    }
-//
-//    public String getToken() {
-//        return token;
-//    }
-//    public void setToken(String token) {
-//        this.token = token;
-//    }
-//
-//    public Date getCreatedAt() {
-//        return createdAt;
-//    }
-//    public void setCreatedAt(Date createdAt) {
-//        this.createdAt = createdAt;
-//    }
-//
-//    public Date getExpiredAt() {
-//        return expiredAt;
-//    }
-//    public void setExpiredAt(Date expiredAt) {
-//        this.expiredAt = expiredAt;
-//    }
+
 }

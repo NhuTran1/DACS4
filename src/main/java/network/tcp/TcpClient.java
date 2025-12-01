@@ -1,46 +1,50 @@
 package network.tcp;
 
-import java.io.IOException;
-import java.io.OutputStreamWriter;
-import java.io.PrintWriter;
-import java.net.InetSocketAddress;
-import java.net.Socket;
+import java.util.function.Consumer;
+import network.p2p.PeerDiscoveryService;
 
-//gui tin den cac peer
 public class TcpClient {
-	private final String host;
-	private final int port;
-	private TcpConnection connection;
-	private TcpReaderThread readerThread;
-	private TcpWriterThread writerThread;
-	
-	public TcpClient(String host, int port, TcpEventHandler handler) {
+    private final String host;
+    private final int port;
+    private final int timeoutMs;
+    private TcpConnection conn;
+    private Consumer<String> messageReceiver;
+    private final PeerDiscoveryService discoveryService;
+    private final Long localUserId; // optional for filtering
+
+    public TcpClient(String host, int port, int timeoutMs, Long localUserId) {
         this.host = host;
         this.port = port;
+        this.timeoutMs = timeoutMs;
+        this.discoveryService = PeerDiscoveryService.getInstance();
+        this.localUserId = localUserId;
+    }
+
+    public void start() {
+        if (conn != null && conn.isConnected()) return;
+        conn = new TcpConnection();
+        conn.setLineListener(this::onLineReceived);
+        conn.connect(host, port, timeoutMs);
+    }
+
+    public void stop() {
+        if (conn != null) conn.close();
+    }
+
+    public void sendCommand(String cmd) {
+        if (conn != null && conn.isConnected()) conn.send(cmd);
+    }
+
+    public void addMessageReceiver(Consumer<String> receiver) {
+        this.messageReceiver = receiver;
+    }
+
+    private void onLineReceived(String line) {
+        if (messageReceiver != null) {
+            try { messageReceiver.accept(line); } catch (Exception ignored) {}
+        }
         try {
-            Socket socket = new Socket(host, port);
-            connection = new TcpConnection(socket);
-
-            readerThread = new TcpReaderThread(connection, handler);
-            writerThread = new TcpWriterThread(connection);
-
-            readerThread.start();
-            writerThread.start();
-        } catch (Exception e) {
-            handler.onError(e);
-        }
+            discoveryService.processServerMessage(line, localUserId);
+        } catch (Exception ignored) {}
     }
-	
-	public void send(String message) {
-        if (writerThread != null) {
-            writerThread.send(message);
-        }
-    }
-
-    public void close() {
-        if (connection != null) connection.close();
-        if (readerThread != null) readerThread.interrupt();
-        if (writerThread != null) writerThread.interrupt();
-    }
-    
 }

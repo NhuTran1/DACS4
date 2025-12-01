@@ -7,6 +7,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 import model.ClientConnection;
+import network.p2p.PeerInfo;
 
 //quan li trang thai realtime cua nguoi dung
 public class RealtimeDao {
@@ -16,6 +17,8 @@ public class RealtimeDao {
 	//  Map user → conversation tham gia
 	    private final Map<Long, List<Long>> userToConversations = new ConcurrentHashMap<>();
 	
+		private final Map<Long, PeerInfo> peerInfo = new ConcurrentHashMap<>();
+		
 	 // Singleton (tùy chọn)
 	    private static final RealtimeDao instance = new RealtimeDao();
 	    private RealtimeDao() {}
