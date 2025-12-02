@@ -12,7 +12,7 @@ import model.Users;
 public class UserDao {
 
     // find by id: get information when logged in
-    public Users findById(long id) {
+    public Users findById(Integer id) {
         try (Session session = HibernateUtil.getSessionFactory().openSession()) {
             return session.get(Users.class, id);
         } catch (Exception e) {

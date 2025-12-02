@@ -17,9 +17,9 @@ public class PeerDiscoveryService {
 	 private static final PeerDiscoveryService instance = new PeerDiscoveryService();
 
     // Map: userId -> PeerInfo
-    private final Map<Long, PeerInfo> activePeers = new ConcurrentHashMap<>();
+    private final Map<Integer, PeerInfo> activePeers = new ConcurrentHashMap<>();
     // Map: localUserId -> Set(friendUserIds)
-    private final Map<Long, Set<Long>> peerSubscriptions = new ConcurrentHashMap<>();
+    private final Map<Integer, Set<Integer>> peerSubscriptions = new ConcurrentHashMap<>();
     
     private final Gson gson = new Gson();
 
@@ -49,7 +49,7 @@ public class PeerDiscoveryService {
      * - Full list: JSON array, or object with "peers".
      * - Incremental: { message: "addNewPeer" | "removePeer", peer: { ... } }
      */
-     public PeerUpdateResult processServerMessage(String json, Long localUserId) {
+     public PeerUpdateResult processServerMessage(String json, Integer localUserId) {
         PeerUpdateResult out = new PeerUpdateResult();
         if (json == null || json.trim().isEmpty()) return out;
         try {
@@ -89,23 +89,23 @@ public class PeerDiscoveryService {
     }
 
     private void syncFullList(Collection<PeerInfo> newPeers, PeerUpdateResult out) {
-        Map<Long, PeerInfo> newMap = new HashMap<>();
+        Map<Integer, PeerInfo> newMap = new HashMap<>();
         for (PeerInfo p : newPeers) {
             if (p != null && p.getUserId() != null) newMap.put(p.getUserId(), p);
         }
 
         // removed
-        Set<Long> removedCandidates = new HashSet<>();
-        for (Long id : activePeers.keySet()) {
+        Set<Integer> removedCandidates = new HashSet<>();
+        for (Integer id : activePeers.keySet()) {
             if (!newMap.containsKey(id)) removedCandidates.add(id);
         }
-        for (Long id : removedCandidates) {
+        for (Integer id : removedCandidates) {
             PeerInfo removed = activePeers.remove(id);
             if (removed != null) out.removed.add(removed);
         }
         // added/updated
-        for (Map.Entry<Long, PeerInfo> e : newMap.entrySet()) {
-            Long id = e.getKey();
+        for (Map.Entry<Integer, PeerInfo> e : newMap.entrySet()) {
+            Integer id = e.getKey();
             PeerInfo newPeer = e.getValue();
             PeerInfo old = activePeers.put(id, newPeer);
             if (old == null) out.added.add(newPeer);
@@ -126,12 +126,12 @@ public class PeerDiscoveryService {
     /**
      * Remove a peer by id.
      */
-    public PeerInfo removePeer(Long id) {
+    public PeerInfo removePeer(Integer id) {
         if (id == null) return null;
         return activePeers.remove(id);
     }
 
-    public PeerInfo getPeer(Long id) {
+    public PeerInfo getPeer(Integer id) {
         if (id == null) return null;
         return activePeers.get(id);
     }
@@ -143,25 +143,25 @@ public class PeerDiscoveryService {
     /**
      * Set friend subscriptions for a local user so getOnlinePeersForUser returns only friends.
      */
-    public void setSubscriptions(Long userId, Collection<Long> friendIds) {
+    public void setSubscriptions(Integer userId, Collection<Integer> friendIds) {
         if (userId == null) return;
-        Set<Long> set = new CopyOnWriteArraySet<>();
+        Set<Integer> set = new CopyOnWriteArraySet<>();
         if (friendIds != null) set.addAll(friendIds);
         peerSubscriptions.put(userId, set);
     }
 
-    public Set<Long> getSubscriptions(Long userId) {
+    public Set<Integer> getSubscriptions(Integer userId) {
         return peerSubscriptions.getOrDefault(userId, Collections.emptySet());
     }
 
     /**
      * Return only peers that are in the user's friend list. If user has no subscription, return all online peers.
      */
-    public List<PeerInfo> getOnlinePeersForUser(Long userId) {
-        Set<Long> subs = peerSubscriptions.get(userId);
+    public List<PeerInfo> getOnlinePeersForUser(Integer userId) {
+        Set<Integer> subs = peerSubscriptions.get(userId);
         if (subs == null || subs.isEmpty()) return getAllPeers();
         List<PeerInfo> out = new ArrayList<>();
-        for (Long fid : subs) {
+        for (Integer fid : subs) {
             PeerInfo p = activePeers.get(fid);
             if (p != null) out.add(p);
         }

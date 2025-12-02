@@ -16,10 +16,10 @@ public class ChatService {
 	    private final UserService userService = new UserService();
 	    private final FriendService friendService = new FriendService();
 	    private final FriendDao friendDao = new FriendDao();
-	    private final RealtimeService realtimeService = new RealtimeService();
+//	    private final RealtimeService realtimeService = new RealtimeService();
 	    
 	 // 1. USER
-	    public Users getUserById(Long id) {
+	    public Users getUserById(Integer id) {
 	        return userService.getUserById(id);
 	    }
 
@@ -27,7 +27,7 @@ public class ChatService {
 	        return userService.getUserByUserName(username);
 	    }
 
-	    public boolean updateUserDisplayName(Long id, String newName) {
+	    public boolean updateUserDisplayName(Integer id, String newName) {
 	        return userService.updateUserDisplayName(id, newName);
 	    }
 
@@ -36,90 +36,71 @@ public class ChatService {
 	    }
 	    
 	    // 2. FRIEND
-	    public void sendFriendRequest(Long fromUserId, Long toUserId) {
+	    public void sendFriendRequest(Integer fromUserId, Integer toUserId) {
 	        friendService.sendFriendRequest(fromUserId, toUserId);
 	    }
 
-	    public void acceptFriendRequest(Long requestId) {
+	    public void acceptFriendRequest(Integer requestId) {
 	        friendService.acceptFriendRequest(requestId);
 	    }
 
-	    public void denyFriendRequest(Long requestId) {
+	    public void denyFriendRequest(Integer requestId) {
 	        friendService.denyFriendRequest(requestId);
 	    }
 
-	    public List<Users> listFriends(Long userId) {
+	    public List<Users> listFriends(Integer userId) {
 	        return friendService.listFriends(userId);
 	    }
 	    
-	    public List<FriendRequest> listFriendRequest(Long userId){
+	    public List<FriendRequest> listFriendRequest(Integer userId){
 			return friendDao.listFriendRequest(userId);
 		}
 	    
 	    // 3. CONVERSATION
-	    public Conversation getConversationById(Long conversationId) {
+	    public Conversation getConversationById(Integer conversationId) {
 	        return conversationService.getConversationById(conversationId);
 	    }
 
-	    public List<Conversation> listConversationsByUser(Long userId) {
+	    public List<Conversation> listConversationsByUser(Integer userId) {
 	        return conversationService.listConversationsByUser(userId);
 	    }
 
-	    public Conversation getDirectConversation(Long userAId, Long userBId) {
+	    public Conversation getDirectConversation(Integer userAId, Integer userBId) {
 	        return conversationService.getDirectConversation(userAId, userBId);
 	    }
 
-	    public Conversation createDirectConversation(Long userAId, Long userBId) {
+	    public Conversation createDirectConversation(Integer userAId, Integer userBId) {
 	        return conversationService.createDirectConversation(userAId, userBId);
 	    }
 
-	    public List<Users> listParticipants(Long conversationId) {
+	    public List<Users> listParticipants(Integer conversationId) {
 	        return conversationService.listParticipants(conversationId);
 	    }
 
-	    public boolean updateConversationName(Long conversationId, String newName, Long requestUserId) {
+	    public boolean updateConversationName(Integer conversationId, String newName, Integer requestUserId) {
 	        return conversationService.updateConversationName(conversationId, newName, requestUserId);
 	    }
 	    
 	 // 4. MESSAGE
-	    public Message sendMessage(Long conversationId, Long senderId, String content, String imageUrl) {
+	    public Message sendMessage(Integer conversationId, Integer senderId, String content, String imageUrl) {
 	        return messageService.sendMessage(conversationId, senderId, content, imageUrl);
 	    }
 
-	    public List<Message> listMessages(Long conversationId) {
+	    public List<Message> listMessages(Integer conversationId) {
 	        return messageService.listMessages(conversationId);
 	    }
 
-	    public void markMessageSeen(Long messageId, Long userId) {
+	    public void markMessageSeen(Integer messageId, Integer userId) {
 	        messageService.markMessageSeen(messageId, userId);
 	    }
 
-	    public void resetUnread(Long conversationId, Long userId) {
+	    public void resetUnread(Integer conversationId, Integer userId) {
 	        messageService.resetUnread(conversationId, userId);
 	    }
 
-	    public Message getMessageById(Long msgId) {
+	    public Message getMessageById(Integer msgId) {
 	        return messageService.getMessageById(msgId);
 	    }
 	    
-	    //5. Realtime
-	    public void onUserOnline(Long userId, ClientConnection conn) {
-	        realtimeService.onUserOnline(userId, conn);
-	    }
 
-	    public void onUserOffline(Long userId, ClientConnection conn) {
-	        realtimeService.onUserOffline(userId);
-	    }
-
-	    public void sendTyping(Long conversationId, Long userId) {
-	        realtimeService.sendTyping(conversationId, userId);
-	    }
-
-	    public void sendMessageRealtime(Long conversationId, Message msg) {
-	        realtimeService.sendMessageRealtime(conversationId, msg);
-	    }
-
-	    public void callSignal(Long toUserId, Long fromUserId, String type, Object payload) {
-	        realtimeService.sendCallSignal(toUserId, fromUserId, type, payload);
-	    }
 }

@@ -27,7 +27,9 @@ public class ClientConnection {
         this.online = true;
     }
 
-    public Long getUserId() {
+  
+
+	public Long getUserId() {
         return userId;
     }
 

@@ -10,23 +10,23 @@ public class FriendService {
 	private FriendDao friendDao = new FriendDao();
 
 	//2.Quan li ban be
-	public void sendFriendRequest(Long fromUserId, Long toUserId) {
+	public void sendFriendRequest(Integer fromUserId, Integer toUserId) {
 		friendDao.sendFriendRequest(fromUserId, toUserId);
 	}
 	
-	public void acceptFriendRequest(Long requestId) {
+	public void acceptFriendRequest(Integer requestId) {
 		friendDao.acceptFriend(requestId);
 	}
 	
-	public void denyFriendRequest(Long requestId) {
+	public void denyFriendRequest(Integer requestId) {
 		friendDao.denyFriendRequest(requestId);
 	}
 	
-	public List<FriendRequest> listFriendRequest(Long userId){
+	public List<FriendRequest> listFriendRequest(Integer userId){
 		return friendDao.listFriendRequest(userId);
 	}
 	
-	public List<Users> listFriends(Long userId) {
+	public List<Users> listFriends(Integer userId) {
 	    return friendDao.listFriend(userId);
 	}
 }

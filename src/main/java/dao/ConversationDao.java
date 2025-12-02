@@ -15,9 +15,9 @@ import model.Users;
 
 public class ConversationDao {
 	//get conversation by id
-	public Conversation getConversation(Long id) {
+	public Conversation getConversation(Integer conversationId) {
 		try(Session session = HibernateUtil.getSessionFactory().openSession()){
-			return session.get(Conversation.class, id);
+			return session.get(Conversation.class, conversationId);
 		}catch (Exception e) {
             e.printStackTrace();
             return null;
@@ -25,7 +25,7 @@ public class ConversationDao {
 	}
 	
 	//get list conversation for 1 user
-	public List<Conversation> listByUser(Long userId){
+	public List<Conversation> listByUser(Integer userId){
 		try(Session session = HibernateUtil.getSessionFactory().openSession()){
 			String sql = """
 					SELECT c.*
@@ -43,7 +43,7 @@ public class ConversationDao {
 	}
 	
 	//Check đã có direct giữa 2 user chưa
-	public Conversation getDirectConversation(Long user1, Long user2) {
+	public Conversation getDirectConversation(Integer user1, Integer user2) {
 	    try (Session session = HibernateUtil.getSessionFactory().openSession()) {
 
 	        String sql = """
@@ -67,7 +67,7 @@ public class ConversationDao {
 	}
 	
 	//create direct conversation
-	public Conversation createDirectConversation(Long userAId, Long userBId) {
+	public Conversation createDirectConversation(Integer userAId, Integer userBId) {
 		Transaction tx = null;
 		
 		try(Session session = HibernateUtil.getSessionFactory().openSession()){
@@ -126,7 +126,7 @@ public class ConversationDao {
 //	}
 	
 	//5.lay danh sach paticipant
-	public List<Users> listParticipants(Long conversationId){
+	public List<Users> listParticipants(Integer conversationId){
 		try(Session session = HibernateUtil.getSessionFactory().openSession()){
 			String sql = """
 					SELECT u.*
@@ -143,7 +143,7 @@ public class ConversationDao {
 	}
 	
 	//6. Update ten nhom
-	public boolean updateConversation(Long conversationId, String newName, Long requestId) {
+	public boolean updateConversation(Integer conversationId, String newName, Integer requestId) {
 		Transaction tx = null;
 		
 		try(Session session = HibernateUtil.getSessionFactory().openSession()){

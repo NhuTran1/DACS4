@@ -28,7 +28,7 @@ public class MessageDao {
 	}
 	
 	//Lay danh sach tin nhan theo conversation
-	public List<Message> listMessageInConversation(Long conversationId){
+	public List<Message> listMessageInConversation(Integer conversationId){
 		try(Session session = HibernateUtil.getSessionFactory().openSession()){
 			String sql = """
 					SELECT *
@@ -45,7 +45,7 @@ public class MessageDao {
 	}
 	
 	//Đánh dấu tin nhắn đã đọc cho 1 user
-	public void markMessageSeen(Long messageId, Long userId) {
+	public void markMessageSeen(Integer messageId, Integer from) {
 	    Transaction tx = null;
 
 	    try (Session session = HibernateUtil.getSessionFactory().openSession()) {
@@ -59,14 +59,14 @@ public class MessageDao {
 
 	        Query<?> checkQuery = session.createNativeQuery(checkSql);
 	        checkQuery.setParameter("mid", messageId);
-	        checkQuery.setParameter("uid", userId);
+	        checkQuery.setParameter("uid", from);
 
 	        Number count = (Number) checkQuery.getSingleResult();
 
 	        if (count.intValue() == 0) {
 	            MessageSeen seen = new MessageSeen();
 	            seen.setMessage(session.get(Message.class, messageId));
-	            seen.setUser(session.get(Users.class, userId));
+	            seen.setUser(session.get(Users.class, from));
 
 	            session.save(seen); // Lưu đúng chỗ
 	        }
@@ -80,7 +80,7 @@ public class MessageDao {
 	}
 
 	// Lấy message theo id
-	public Message getMessageById(Long messageId) {
+	public Message getMessageById(Integer messageId) {
 	    try (Session session = HibernateUtil.getSessionFactory().openSession()) {
 	        return session.get(Message.class, messageId);
 	    } catch (Exception e) {
@@ -91,7 +91,7 @@ public class MessageDao {
 
 	
 	//Reset số tn chưa đọc trong conversation
-	public void resetUnread(Long conversationId, Long userId) {
+	public void resetUnread(Integer conversationId, Integer userId) {
 		Transaction tx = null;
 		
 		try(Session session = HibernateUtil.getSessionFactory().openSession()){
@@ -116,7 +116,7 @@ public class MessageDao {
 	}
 		
 		// Thêm 1 method helper: tăng unread count cho tất cả user trừ sender
-	public void increaseUnreadCount(Long conversationId, Long senderId) {
+	public void increaseUnreadCount(Integer conversationId, Integer senderId) {
 	    Transaction tx = null;
 	    
 	    try(Session session = HibernateUtil.getSessionFactory().openSession()) {

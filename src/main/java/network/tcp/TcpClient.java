@@ -10,9 +10,9 @@ public class TcpClient {
     private TcpConnection conn;
     private Consumer<String> messageReceiver;
     private final PeerDiscoveryService discoveryService;
-    private final Long localUserId; // optional for filtering
+    private final Integer localUserId; // optional for filtering
 
-    public TcpClient(String host, int port, int timeoutMs, Long localUserId) {
+    public TcpClient(String host, int port, int timeoutMs, Integer localUserId) {
         this.host = host;
         this.port = port;
         this.timeoutMs = timeoutMs;

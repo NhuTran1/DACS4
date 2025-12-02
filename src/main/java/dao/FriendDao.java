@@ -14,7 +14,7 @@ import model.Users;
 
 public class FriendDao {
 	//send friend request: save record into friend_request
-	public void sendFriendRequest(Long fromUserId, Long toUserId) {
+	public void sendFriendRequest(Integer fromUserId, Integer toUserId) {
         Transaction tx = null;
         try (Session session = HibernateUtil.getSessionFactory().openSession()) {
             tx = session.beginTransaction();
@@ -34,7 +34,7 @@ public class FriendDao {
 	
 	
 	//thêm vào bảng friend (many-to-many) và xóa request.
-		public void acceptFriend(Long requestId) {
+		public void acceptFriend(Integer requestId) {
 	        Transaction tx = null;
 	        try (Session session = HibernateUtil.getSessionFactory().openSession()) {
 	            tx = session.beginTransaction();
@@ -62,7 +62,7 @@ public class FriendDao {
 	    }
 	
 	//từ chối: xóa request mà không tạo friend
-	 public void denyFriendRequest(Long requestId) {
+	 public void denyFriendRequest(Integer requestId) {
 	        Transaction tx = null;
 	        try (Session session = HibernateUtil.getSessionFactory().openSession()) {
 	            tx = session.beginTransaction();
@@ -79,7 +79,7 @@ public class FriendDao {
 	 }
 	
 	//liệt kê tất cả friend của user
-	public List<Users> listFriend(Long userId){
+	public List<Users> listFriend(Integer userId){
 	    try(Session session = HibernateUtil.getSessionFactory().openSession()){
 	        String sql = """
 	                SELECT u.*
@@ -100,7 +100,7 @@ public class FriendDao {
 
 	
 	//liệt kê các friend request nhận đc
-	public List<FriendRequest> listFriendRequest(Long userId){
+	public List<FriendRequest> listFriendRequest(Integer userId){
 		try(Session session = HibernateUtil.getSessionFactory().openSession()){
 			String sql = """
 					SELECT * FROM friend_request
@@ -115,7 +115,7 @@ public class FriendDao {
 	}
 	
 	//check đã tồn tại friend request từ fromUser -> toUser chưa
-	public boolean exitsFriendRequest(Long fromUserId, Long toUserId) {
+	public boolean exitsFriendRequest(Integer fromUserId, Integer toUserId) {
 		try(Session session = HibernateUtil.getSessionFactory().openSession()){
 			String sql = """
 					SELECT COUNT(*)
@@ -132,7 +132,7 @@ public class FriendDao {
 	
 	
 	//Check đã là friend hay chưa giữa 2 user
-	public boolean exitsFriend(Long userId1, Long userId2) {
+	public boolean exitsFriend(Integer userId1, Integer userId2) {
 		try(Session session = HibernateUtil.getSessionFactory().openSession()){
 			String sql = """
 					SELECT COUNT(*)

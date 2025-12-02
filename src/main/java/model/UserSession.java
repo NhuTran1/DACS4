@@ -26,10 +26,10 @@ public class UserSession {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
+    private Integer id;
 
     @Column(name = "user_id", nullable = false)
-    private Long userId;
+    private Integer userId;
 
     @Column(name = "token", nullable = false, unique = true, length = 255)
     private String token;

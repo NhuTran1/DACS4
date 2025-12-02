@@ -17,7 +17,7 @@ public class MessageService {
     private UserDao userDao = new UserDao();
 
     // 1. Gửi tin nhắn
-    public Message sendMessage(Long conversationId, Long senderId, String content, String imageUrl) {
+    public Message sendMessage(Integer conversationId, Integer senderId, String content, String imageUrl) {
 
         // Kiểm tra conversation tồn tại
         Conversation conv = conversationDao.getConversation(conversationId);
@@ -61,12 +61,12 @@ public class MessageService {
     }
 
     // 2. Lấy lịch sử tin nhắn
-    public List<Message> listMessages(Long conversationId) {
+    public List<Message> listMessages(Integer conversationId) {
         return messageDao.listMessageInConversation(conversationId);
     }
 
     // 3. Đánh dấu đã đọc 1 message
-    public void markMessageSeen(Long messageId, Long userId) {
+    public void markMessageSeen(Integer messageId, Integer userId) {
         messageDao.markMessageSeen(messageId, userId);
         // đồng thời reset unread_count
         Message msg = getMessageById(messageId);
@@ -76,12 +76,12 @@ public class MessageService {
     }
 
     // 4. Reset unread count khi user mở cuộc chat
-    public void resetUnread(Long conversationId, Long userId) {
+    public void resetUnread(Integer conversationId, Integer userId) {
         messageDao.resetUnread(conversationId, userId);
     }
     
     // 5. Helper: lấy message theo id
-    public Message getMessageById(Long msgId) {
+    public Message getMessageById(Integer msgId) {
         // Vì bạn không có MessageDao.findById(), nên dùng session tạm
         try (var session = config.HibernateUtil.getSessionFactory().openSession()) {
             return session.get(Message.class, msgId);

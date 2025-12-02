@@ -49,7 +49,7 @@ public class AuthService {
     }
 
     // logout
-    public void logout(Long userId, String token) {
+    public void logout(Integer userId, String token) {
         sessionDao.deleteByUserIdAndToken(userId, token);
     }
 
@@ -81,7 +81,7 @@ public class AuthService {
                     .parseClaimsJws(token)
                     .getBody();
 
-            Long userId = Long.valueOf(claims.getSubject());
+            Integer userId = Integer.valueOf(claims.getSubject());
 
             // kiểm tra token có tồn tại trong DB và chưa hết hạn
             UserSession session = sessionDao.findByUserIdAndToken(userId, token);
@@ -96,7 +96,7 @@ public class AuthService {
     }
 
     // tao JWT token
-    private String generateToken(Long userId, String username) {
+    private String generateToken(Integer userId, String username) {
 
         long now = System.currentTimeMillis();
 

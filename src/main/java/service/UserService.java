@@ -9,7 +9,7 @@ public class UserService {
 	private UserDao userDao = new UserDao();
 	
 	//1.Quan li User
-		public Users getUserById(Long id) {
+		public Users getUserById(Integer id) {
 			return userDao.findById(id);
 		}
 		
@@ -26,7 +26,7 @@ public class UserService {
 //			return true;
 //		}
 		
-		public boolean updateUserDisplayName(Long userId, String newName) {
+		public boolean updateUserDisplayName(Integer userId, String newName) {
 	        Users user = userDao.findById(userId);
 	        if (user == null) return false;
 

@@ -1,17 +1,17 @@
 package network.p2p;
 
 public class PeerInfo {
-	private Long userId;
+	private Integer userId;
     private String ip;
     private int port;
 
-    public PeerInfo(Long userId, String ip, int port) {
-        this.userId = userId;
+    public PeerInfo(Integer userId2, String ip, int port) {
+        this.userId = userId2;
         this.ip = ip;
         this.port = port;
     }
 
-    public Long getUserId() { 
+    public Integer getUserId() { 
     	return userId; 
     }
     
@@ -23,7 +23,7 @@ public class PeerInfo {
     	return port; 
     }
 
-    public void setUserId(Long userId) { this.userId = userId; }
+    public void setUserId(Integer userId) { this.userId = userId; }
     public void setIp(String ip) { this.ip = ip; }
     public void setPort(int port) { this.port = port; }
 

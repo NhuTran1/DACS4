@@ -14,7 +14,7 @@ public class UserSessionDao extends BaseDao<UserSession> {
     }
 
     // Tìm session theo userId và token
-    public UserSession findByUserIdAndToken(Long userId, String token) {
+    public UserSession findByUserIdAndToken(Integer userId, String token) {
         return executeRead(session -> {
             NativeQuery<UserSession> query = session.createNativeQuery(
                 "SELECT * FROM user_sessions WHERE user_id = :uid AND token = :token",
@@ -27,7 +27,7 @@ public class UserSessionDao extends BaseDao<UserSession> {
     }
 
     // Xóa session theo userId và token
-    public void deleteByUserIdAndToken(Long userId, String token) {
+    public void deleteByUserIdAndToken(Integer userId, String token) {
         executeTransaction(session -> {
             NativeQuery<?> query = session.createNativeQuery(
                 "DELETE FROM user_sessions WHERE user_id = :uid AND token = :token"
