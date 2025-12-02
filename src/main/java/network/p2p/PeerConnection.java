@@ -37,6 +37,8 @@ public class PeerConnection {
         void onConnectionLost();
     }
 
+    
+
     public PeerConnection(PeerInfo remotePeer) {
         this.remotePeer = remotePeer;
     }
