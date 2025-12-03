@@ -142,6 +142,22 @@ public class P2PManager implements PeerConnection.P2PMessageHandler {
         }
     }
 
+     public void sendTypingStop(Integer conversationId) {
+        var participants = chatService.listParticipants(conversationId);
+        if (participants == null) return;
+
+        String json = P2PMessageProtocol.buildTypingStop(localUserId, conversationId);
+
+        for (var user : participants) {
+            if (user.getId().equals(localUserId)) continue;
+
+            PeerConnection conn = activeConnections.get(user.getId());
+            if (conn != null) {
+                conn.sendTcp(json);
+            }
+        }
+    }
+
     /**
      * Gửi file request tới peer
      */

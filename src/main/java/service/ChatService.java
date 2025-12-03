@@ -73,13 +73,18 @@ public class ChatService {
 	        return conversationService.createDirectConversation(userAId, userBId);
 	    }
 
-	    public List<Users> listParticipants(Integer conversationId) {
-	        return conversationService.listParticipants(conversationId);
-	    }
+		// NEW: wrapper for group creation
+		// public Conversation createGroupConversation(String name, List<Integer> memberIds) {
+		// 	return conversationService.createGroupConversation(name, memberIds);
+		// }
 
-	    public boolean updateConversationName(Integer conversationId, String newName, Integer requestUserId) {
-	        return conversationService.updateConversationName(conversationId, newName, requestUserId);
-	    }
+		public List<Users> listParticipants(Integer conversationId) {
+			return conversationService.listParticipants(conversationId);
+		}
+
+		public boolean updateConversationName(Integer conversationId, String newName, Integer requestUserId) {
+			return conversationService.updateConversationName(conversationId, newName, requestUserId);
+		}
 	    
 	 // 4. MESSAGE
 	    public Message sendMessage(Integer conversationId, Integer senderId, String content, String imageUrl) {
