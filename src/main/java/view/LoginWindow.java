@@ -294,7 +294,7 @@ public class LoginWindow {
                 P2PManager p2pManager = new P2PManager(user.getId(), chatService);
                 
                 // Show chat window (reusing same stage)
-                ChatWindow chatWindow = new ChatWindow(stage, chatService, p2pManager, user.getId());
+                ChatWindow chatWindow = new ChatWindow(stage, chatService, p2pManager, user.getId(), null);
                 chatWindow.show();
             }else {
                 showError("Invalid username or password");

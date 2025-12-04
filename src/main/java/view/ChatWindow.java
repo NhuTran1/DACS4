@@ -1,5 +1,6 @@
 package view;
 
+import client.ClientManager;
 import controller.ChatController;
 import javafx.application.Platform;
 import javafx.geometry.Insets;
@@ -29,6 +30,7 @@ public class ChatWindow {
     private final P2PManager p2pManager;
     private final Integer currentUserId;
     private final ChatController chatController;
+    private final client.ClientManager clientManager;
     
     // UI Components
     private ListView<Conversation> conversationListView;
@@ -45,12 +47,13 @@ public class ChatWindow {
     private static final DateTimeFormatter TIME_FORMATTER = DateTimeFormatter.ofPattern("HH:mm");
     private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm");
 
-    public ChatWindow(Stage stage, ChatService chatService, P2PManager p2pManager, Integer userId) {
+    public ChatWindow(Stage stage, ChatService chatService, P2PManager p2pManager, Integer userId, client.ClientManager clientManager) {
         this.stage = stage;
         this.chatService = chatService;
         this.p2pManager = p2pManager;
         this.currentUserId = userId;
         this.chatController = new ChatController(chatService, p2pManager, userId);
+        this.clientManager = clientManager;
         
         setupP2PListeners();
     }
@@ -71,6 +74,18 @@ public class ChatWindow {
         Scene scene = new Scene(root, 1200, 750);
         stage.setScene(scene);
         stage.setTitle("Chat App");
+        
+        // Handle window close event
+        stage.setOnCloseRequest(e -> {
+            System.out.println("🛑 Application closing...");
+            if (clientManager != null) {
+                clientManager.shutdown();
+            }
+            if (chatController != null) {
+                chatController.shutdown();
+            }
+        });
+        
         stage.show();
         
         // Load conversations
@@ -585,11 +600,66 @@ public class ChatWindow {
     }
 
     private void showSettingsDialog() {
-        Alert alert = new Alert(Alert.AlertType.INFORMATION);
-        alert.setTitle("Settings");
-        alert.setHeaderText("User Settings");
-        alert.setContentText("Settings dialog - To be implemented");
-        alert.showAndWait();
+        Dialog<ButtonType> dialog = new Dialog<>();
+        dialog.setTitle("Settings & Info");
+        dialog.setHeaderText("Connection Status");
+        
+        VBox content = new VBox(15);
+        content.setPadding(new Insets(20));
+        content.setStyle("-fx-background-color: #16213e;");
+        
+        // Connection status
+        Label statusLabel = new Label("Signaling Server: " + 
+            (clientManager.isConnectedToSignalingServer() ? "✅ Connected" : "❌ Disconnected"));
+        statusLabel.setTextFill(Color.web("#eaeaea"));
+        statusLabel.setFont(Font.font(14));
+        
+        Label userLabel = new Label("User: " + chatService.getUserById(currentUserId).getDisplayName() + 
+            " (ID: " + currentUserId + ")");
+        userLabel.setTextFill(Color.web("#eaeaea"));
+        userLabel.setFont(Font.font(14));
+        
+        Label portLabel = new Label("P2P Port: " + clientManager.getP2pPort());
+        portLabel.setTextFill(Color.web("#eaeaea"));
+        portLabel.setFont(Font.font(14));
+        
+        // Online peers
+        Label peersHeader = new Label("\n👥 Online Friends:");
+        peersHeader.setTextFill(Color.web("#667eea"));
+        peersHeader.setFont(Font.font("System", FontWeight.BOLD, 14));
+        
+        VBox peersList = new VBox(5);
+        List<network.p2p.PeerInfo> onlinePeers = clientManager.getOnlinePeers();
+        
+        if (onlinePeers.isEmpty()) {
+            Label noPeers = new Label("  No friends online");
+            noPeers.setTextFill(Color.web("#888"));
+            noPeers.setFont(Font.font(12));
+            peersList.getChildren().add(noPeers);
+        } else {
+            for (network.p2p.PeerInfo peer : onlinePeers) {
+                if (!peer.getUserId().equals(currentUserId)) {
+                    Label peerLabel = new Label("  • " + getConversationDisplayNameForUser(peer.getUserId()) + 
+                        " (" + peer.getIp() + ":" + peer.getPort() + ")");
+                    peerLabel.setTextFill(Color.web("#aaa"));
+                    peerLabel.setFont(Font.font(12));
+                    peersList.getChildren().add(peerLabel);
+                }
+            }
+        }
+        
+        content.getChildren().addAll(statusLabel, userLabel, portLabel, peersHeader, peersList);
+        
+        dialog.getDialogPane().setContent(content);
+        dialog.getDialogPane().setStyle("-fx-background-color: #16213e;");
+        dialog.getDialogPane().getButtonTypes().addAll(ButtonType.OK);
+        
+        dialog.showAndWait();
+    }
+    
+    private String getConversationDisplayNameForUser(Integer userId) {
+        Users user = chatService.getUserById(userId);
+        return user != null ? user.getDisplayName() : "User" + userId;
     }
 
     private void showConversationInfo() {
