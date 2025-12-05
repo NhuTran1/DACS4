@@ -78,6 +78,18 @@ public class ChatClientMain {
             public void onConnectionLost(Integer userId) {
                 System.out.println("⚠️  Connection lost with " + getUserName(userId));
             }
+
+			@Override
+			public void onChatRequestReceived(Integer fromUser, String fromDisplayName) {
+				// TODO Auto-generated method stub
+				
+			}
+
+			@Override
+			public void onChatRequestResponse(Integer fromUser, boolean accepted) {
+				// TODO Auto-generated method stub
+				
+			}
         });
 
         // 5. Kết nối tới Signaling Server

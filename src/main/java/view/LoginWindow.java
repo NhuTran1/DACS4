@@ -1,6 +1,7 @@
 package view;
 
 import javafx.animation.*;
+import javafx.application.Platform;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Scene;
@@ -12,37 +13,31 @@ import javafx.scene.paint.Color;
 import javafx.scene.paint.CycleMethod;
 import javafx.scene.paint.LinearGradient;
 import javafx.scene.paint.Stop;
-import javafx.scene.shape.Rectangle;
+import javafx.scene.shape.Circle;
 import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
 import javafx.stage.Stage;
 import javafx.util.Duration;
-import service.AuthService;
-import service.ChatService;
-import client.ChatClientMain;
+import client.ClientManager;
 import controller.LoginController;
-import dao.UserDao;
 import model.Users;
 import network.p2p.P2PManager;
+import service.ChatService;
 
 public class LoginWindow {
     private final Stage stage;
     private final LoginController loginController = new LoginController();
+    private ProgressIndicator loadingIndicator;
 
-    
     public LoginWindow(Stage stage) {
         this.stage = stage;
     }
     
     public void show() {
-        // Main container
         StackPane root = new StackPane();
         root.setStyle("-fx-background-color: #1a1a2e;");
         
-        // Animated background
         Region animatedBg = createAnimatedBackground();
-        
-        // Login card
         VBox loginCard = createLoginCard();
         
         root.getChildren().addAll(animatedBg, loginCard);
@@ -53,7 +48,6 @@ public class LoginWindow {
         stage.setResizable(false);
         stage.show();
         
-        // Entrance animation
         playEntranceAnimation(loginCard);
     }
     
@@ -61,7 +55,6 @@ public class LoginWindow {
         Pane pane = new Pane();
         pane.setPrefSize(1000, 650);
         
-        // Create gradient circles
         for (int i = 0; i < 5; i++) {
             Circle circle = createGradientCircle(i);
             pane.getChildren().add(circle);
@@ -87,7 +80,6 @@ public class LoginWindow {
         circle.setFill(new LinearGradient(0, 0, 1, 1, true, CycleMethod.NO_CYCLE, stops));
         circle.setEffect(new GaussianBlur(50));
         
-        // Floating animation
         TranslateTransition tt = new TranslateTransition(Duration.seconds(5 + index), circle);
         tt.setByY(30 + index * 10);
         tt.setAutoReverse(true);
@@ -104,7 +96,6 @@ public class LoginWindow {
         card.setAlignment(Pos.TOP_CENTER);
         card.setPadding(new Insets(50, 50, 40, 50));
         
-        // Glass morphism effect
         card.setStyle(
             "-fx-background-color: rgba(22, 33, 62, 0.85);" +
             "-fx-background-radius: 20;" +
@@ -118,7 +109,6 @@ public class LoginWindow {
         shadow.setColor(Color.web("#667eea", 0.5));
         card.setEffect(shadow);
         
-        // Logo & Title
         Label logo = new Label("💬");
         logo.setFont(Font.font(60));
         
@@ -130,15 +120,17 @@ public class LoginWindow {
         subtitle.setFont(Font.font(14));
         subtitle.setTextFill(Color.web("#aaaaaa"));
         
-        // Input fields
         TextField usernameField = createStyledTextField("Username");
         PasswordField passwordField = createStyledPasswordField("Password");
         
-        // Login button
-        Button loginBtn = createGradientButton("Login");
-        loginBtn.setOnAction(e -> handleLogin(usernameField.getText(), passwordField.getText()));
+        // Loading indicator
+        loadingIndicator = new ProgressIndicator();
+        loadingIndicator.setMaxSize(30, 30);
+        loadingIndicator.setVisible(false);
         
-        // Register link
+        Button loginBtn = createGradientButton("Login");
+        loginBtn.setOnAction(e -> handleLogin(usernameField.getText(), passwordField.getText(), loginBtn));
+        
         HBox registerBox = new HBox(5);
         registerBox.setAlignment(Pos.CENTER);
         
@@ -149,20 +141,15 @@ public class LoginWindow {
         Hyperlink registerLink = new Hyperlink("Sign up");
         registerLink.setTextFill(Color.web("#667eea"));
         registerLink.setFont(Font.font(13));
-        //registerLink.setOnAction(e -> showRegisterWindow());
         registerLink.setStyle("-fx-border-width: 0; -fx-padding: 0;");
         registerLink.setOnAction(e -> new RegisterWindow(stage).show());
         
         registerBox.getChildren().addAll(registerLabel, registerLink);
         
         card.getChildren().addAll(
-            logo,
-            title,
-            subtitle,
-            usernameField,
-            passwordField,
-            loginBtn,
-            registerBox
+            logo, title, subtitle,
+            usernameField, passwordField,
+            loadingIndicator, loginBtn, registerBox
         );
         
         return card;
@@ -185,13 +172,9 @@ public class LoginWindow {
             "-fx-padding: 0 15;"
         );
         
-        // Focus effect
         field.focusedProperty().addListener((obs, old, focused) -> {
             if (focused) {
-                field.setStyle(
-                    field.getStyle() +
-                    "-fx-border-color: #667eea;"
-                );
+                field.setStyle(field.getStyle() + "-fx-border-color: #667eea;");
             } else {
                 field.setStyle(field.getStyle().replace("-fx-border-color: #667eea;", ""));
             }
@@ -235,20 +218,12 @@ public class LoginWindow {
         btn.setFont(Font.font("System", FontWeight.BOLD, 15));
         btn.setTextFill(Color.WHITE);
         
-        Stop[] stops = new Stop[] {
-            new Stop(0, Color.web("#667eea")),
-            new Stop(1, Color.web("#764ba2"))
-        };
-        
-        LinearGradient gradient = new LinearGradient(0, 0, 1, 0, true, CycleMethod.NO_CYCLE, stops);
-        
         btn.setStyle(
             "-fx-background-color: linear-gradient(to right, #667eea, #764ba2);" +
             "-fx-background-radius: 10;" +
             "-fx-cursor: hand;"
         );
         
-        // Hover effect
         btn.setOnMouseEntered(e -> {
             ScaleTransition st = new ScaleTransition(Duration.millis(100), btn);
             st.setToX(1.05);
@@ -282,43 +257,84 @@ public class LoginWindow {
         parallel.play();
     }
     
-    private void handleLogin(String username, String password) {
-        try {
-            Users user = loginController.login(username, password);
-            
-            if(user != null) {
-                showSuccess("Login successful");
+    private void handleLogin(String username, String password, Button loginBtn) {
+        if (username.trim().isEmpty() || password.trim().isEmpty()) {
+            showError("Please enter username and password");
+            return;
+        }
+        
+        // Disable button and show loading
+        loginBtn.setDisable(true);
+        loadingIndicator.setVisible(true);
+        
+        // Run in background thread
+        new Thread(() -> {
+            try {
+                // 1. Authenticate user
+                Users user = loginController.login(username, password);
                 
-                // Start ChatWindow (create ChatService & P2PManager for this user)
-                ChatService chatService = new ChatService();
-                P2PManager p2pManager = new P2PManager(user.getId(), chatService);
+                if (user == null) {
+                    Platform.runLater(() -> {
+                        loginBtn.setDisable(false);
+                        loadingIndicator.setVisible(false);
+                        showError("Invalid username or password");
+                    });
+                    return;
+                }
                 
-                // Show chat window (reusing same stage)
-                ChatWindow chatWindow = new ChatWindow(stage, chatService, p2pManager, user.getId(), null);
-                chatWindow.show();
-            }else {
-                showError("Invalid username or password");
+                // 2. Initialize ClientManager and connect to signaling server
+                ClientManager clientManager = new ClientManager(user.getId(), user.getUsername());
+                
+                boolean serverConnected = clientManager.start();
+                
+                if (!serverConnected) {
+                    Platform.runLater(() -> {
+                        loginBtn.setDisable(false);
+                        loadingIndicator.setVisible(false);
+                        showError("Cannot connect to server. Please check if the server is running.");
+                    });
+                    return;
+                }
+                
+                // 3. Success - show chat window
+                Platform.runLater(() -> {
+                    loginBtn.setDisable(false);
+                    loadingIndicator.setVisible(false);
+                    
+                    ChatService chatService = clientManager.getChatService();
+                    P2PManager p2pManager = clientManager.getP2pManager();
+                    
+                    ChatWindow chatWindow = new ChatWindow(
+                        stage, 
+                        chatService, 
+                        p2pManager, 
+                        user.getId(), 
+                        clientManager
+                    );
+                    chatWindow.show();
+                });
+                
+            } catch (Exception ex) {
+                Platform.runLater(() -> {
+                    loginBtn.setDisable(false);
+                    loadingIndicator.setVisible(false);
+                    showError("Login failed: " + ex.getMessage());
+                });
             }
-        } catch (Exception ex) {
-            showError(ex.getMessage());
-        } 
+        }).start();
     }
-    
-//    private void showChatWindow(Users user) {
-//        ChatWindow chatWindow = new ChatWindow(stage, user);
-//        chatWindow.show();
-//    }
-//    
-//    private void showRegisterWindow() {
-//        RegisterWindow registerWindow = new RegisterWindow(stage);
-//        registerWindow.show();
-//    }
     
     private void showError(String message) {
         Alert alert = new Alert(Alert.AlertType.ERROR);
         alert.setTitle("Error");
         alert.setHeaderText(null);
         alert.setContentText(message);
+        
+        // Style the alert
+        DialogPane dialogPane = alert.getDialogPane();
+        dialogPane.setStyle("-fx-background-color: #1a1d2e;");
+        dialogPane.lookup(".content.label").setStyle("-fx-text-fill: #ffffff;");
+        
         alert.showAndWait();
     }
     
@@ -327,13 +343,11 @@ public class LoginWindow {
         alert.setTitle("Success");
         alert.setHeaderText(null);
         alert.setContentText(message);
+        
+        DialogPane dialogPane = alert.getDialogPane();
+        dialogPane.setStyle("-fx-background-color: #1a1d2e;");
+        dialogPane.lookup(".content.label").setStyle("-fx-text-fill: #ffffff;");
+        
         alert.show();
     }
-    
-    // Inner Circle class for background
-    private static class Circle extends javafx.scene.shape.Circle {
-
-		public Circle(double d) {
-			// TODO Auto-generated constructor stub
-		}}
 }

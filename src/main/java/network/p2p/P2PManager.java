@@ -28,6 +28,10 @@ public class P2PManager implements PeerConnection.P2PMessageHandler {
         void onFileRequestReceived(Integer fromUser, String fileName, Integer fileSize);
         void onCallOfferReceived(Integer fromUser, String sdp);
         void onConnectionLost(Integer userId);
+
+        // New events for chat request flow
+        void onChatRequestReceived(Integer fromUser, String fromDisplayName);
+        void onChatRequestResponse(Integer fromUser, boolean accepted);
     }
 
     public P2PManager(Integer localUserId, ChatService chatService) {
@@ -213,6 +217,7 @@ public class P2PManager implements PeerConnection.P2PMessageHandler {
 
             switch (type) {
                 case CHAT_MESSAGE -> handleChatMessage(msg);
+                
                 case TYPING_START -> handleTypingStart(msg);
                 case TYPING_STOP -> handleTypingStop(msg);
                 case FILE_REQUEST -> handleFileRequest(msg);

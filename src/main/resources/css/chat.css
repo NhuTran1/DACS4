@@ -1,0 +1,167 @@
+/* Root colors */
+.root {
+    -fx-font-family: "Segoe UI", "San Francisco", "Helvetica Neue", Arial, sans-serif;
+    -fx-background-color: #0a0e27;
+}
+
+/* Scrollbar styling */
+.scroll-bar {
+    -fx-background-color: transparent;
+}
+
+.scroll-bar .thumb {
+    -fx-background-color: rgba(102, 126, 234, 0.5);
+    -fx-background-radius: 5;
+}
+
+.scroll-bar .thumb:hover {
+    -fx-background-color: rgba(102, 126, 234, 0.7);
+}
+
+.scroll-bar .track {
+    -fx-background-color: transparent;
+}
+
+.scroll-bar .increment-button,
+.scroll-bar .decrement-button {
+    -fx-background-color: transparent;
+    -fx-padding: 0;
+}
+
+/* ListView styling */
+.list-view {
+    -fx-background-color: transparent;
+    -fx-border-width: 0;
+    -fx-focus-color: transparent;
+}
+
+.list-view .list-cell {
+    -fx-background-color: transparent;
+    -fx-padding: 5;
+}
+
+.list-view .list-cell:hover {
+    -fx-background-color: rgba(102, 126, 234, 0.1);
+}
+
+.list-view .list-cell:selected {
+    -fx-background-color: rgba(102, 126, 234, 0.2);
+}
+
+/* TextField focus styling */
+.text-field:focused,
+.password-field:focused {
+    -fx-border-color: #667eea;
+    -fx-border-width: 2;
+}
+
+/* Button hover effects */
+.button:hover {
+    -fx-opacity: 0.9;
+}
+
+.button:pressed {
+    -fx-opacity: 0.8;
+}
+
+/* Dialog styling */
+.dialog-pane {
+    -fx-background-color: #1a1d2e;
+}
+
+.dialog-pane .label {
+    -fx-text-fill: #ffffff;
+}
+
+.dialog-pane .button {
+    -fx-background-color: #667eea;
+    -fx-text-fill: white;
+    -fx-background-radius: 8;
+    -fx-padding: 8 20;
+}
+
+.dialog-pane .button:hover {
+    -fx-background-color: #7c8ff0;
+}
+
+/* Alert styling */
+.alert .dialog-pane {
+    -fx-background-color: #1a1d2e;
+}
+
+.alert .dialog-pane .label.content {
+    -fx-text-fill: #ffffff;
+}
+
+.alert .dialog-pane .header-panel {
+    -fx-background-color: #262b40;
+}
+
+/* Tooltip styling */
+.tooltip {
+    -fx-background-color: #1a1d2e;
+    -fx-text-fill: #ffffff;
+    -fx-background-radius: 8;
+    -fx-border-color: #667eea;
+    -fx-border-width: 1;
+    -fx-border-radius: 8;
+    -fx-padding: 8;
+    -fx-font-size: 12;
+}
+
+/* Context menu styling */
+.context-menu {
+    -fx-background-color: #1a1d2e;
+    -fx-border-color: #667eea;
+    -fx-border-width: 1;
+    -fx-border-radius: 8;
+}
+
+.context-menu .menu-item {
+    -fx-background-color: transparent;
+    -fx-text-fill: #ffffff;
+}
+
+.context-menu .menu-item:hover {
+    -fx-background-color: rgba(102, 126, 234, 0.3);
+}
+
+/* Progress indicator */
+.progress-indicator .percentage {
+    -fx-fill: #667eea;
+}
+
+.progress-indicator .indicator {
+    -fx-progress-color: #667eea;
+}
+
+/* Animations */
+@keyframes pulse {
+    0%, 100% {
+        -fx-opacity: 1;
+    }
+    50% {
+        -fx-opacity: 0.7;
+    }
+}
+
+@keyframes slideIn {
+    from {
+        -fx-translate-x: -20;
+        -fx-opacity: 0;
+    }
+    to {
+        -fx-translate-x: 0;
+        -fx-opacity: 1;
+    }
+}
+
+/* Status dot animation */
+@keyframes statusBlink {
+    0%, 100% {
+        -fx-opacity: 1;
+    }
+    50% {
+        -fx-opacity: 0.5;
+    }
+}

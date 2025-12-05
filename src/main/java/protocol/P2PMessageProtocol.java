@@ -25,6 +25,7 @@ public class P2PMessageProtocol {
     // Message types
     public enum MessageType {
         CHAT_MESSAGE,      // Tin nhắn chat thông thường
+       
         TYPING_START,      // Bắt đầu typing
         TYPING_STOP,       // Dừng typing
         FILE_REQUEST,      // Yêu cầu gửi file
@@ -55,6 +56,8 @@ public class P2PMessageProtocol {
             this.data = new HashMap<>();
         }
     }
+
+    
 
     // ===== BUILDER METHODS =====
 
