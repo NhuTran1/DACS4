@@ -9,7 +9,9 @@ network\p2p\P2PServer$P2PMessageHandler.class
 dao\UserDao.class
 model\Message.class
 network\tcp\TcpReaderThread.class
+network\p2p\FileTransferManager$FileTransferSession.class
 view\ChatWindow$FriendCell.class
+network\p2p\FileTransferManager.class
 network\p2p\PeerConnection.class
 model\Users.class
 view\components\GlassCard.class
@@ -52,13 +54,16 @@ view\ChatWindow$1$1.class
 network\p2p\PeerConnection$P2PMessageHandler.class
 dao\BaseDao.class
 model\ClientConnection.class
+network\p2p\AudioRecorder$AudioTransferSession.class
 dao\FriendDao.class
 network\p2p\PeerDiscoveryService.class
+network\p2p\AudioRecorder.class
 view\components\GradientButton.class
 network\p2p\PeerDiscoveryService$SignalingMessage.class
 test\TestClient.class
 network\p2p\P2PManager.class
 config\AppConfig.class
+network\p2p\FileTransferManager$FileTransferListener.class
 network\signaling\SignalingServer$ClientHandler.class
 network\signaling\SignalingServer.class
 test\P2PServer.class
@@ -68,4 +73,5 @@ config\HibernateUtil.class
 model\FriendRequest.class
 view\components\StyledTextField.class
 model\Participant.class
+network\p2p\AudioRecorder$AudioTransferListener.class
 network\p2p\PeerDiscoveryService$PeerUpdateResult.class

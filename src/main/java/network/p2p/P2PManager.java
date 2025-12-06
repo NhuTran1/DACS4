@@ -82,7 +82,7 @@ public class P2PManager implements PeerConnection.P2PMessageHandler {
     /**
      * Lấy hoặc tạo connection tới peer
      */
-    private PeerConnection getOrCreateConnection(Integer userId) {
+    public PeerConnection getOrCreateConnection(Integer userId) {
         PeerConnection conn = activeConnections.get(userId);
         if (conn != null && conn.isTcpConnected()) {
             return conn;
@@ -165,13 +165,23 @@ public class P2PManager implements PeerConnection.P2PMessageHandler {
     /**
      * Gửi file request tới peer
      */
-    public boolean sendFileRequest(Integer toUserId, String fileName, Integer fileSize) {
-        PeerConnection conn = getOrCreateConnection(toUserId);
-        if (conn == null) return false;
-
-        String json = P2PMessageProtocol.buildFileRequest(localUserId, toUserId, fileName, fileSize);
-        return conn.sendTcp(json);
-    }
+     public boolean sendFileRequest(Integer toUserId, Integer conversationId, String fileName, Long fileSize, String fileId) {
+	    PeerConnection conn = getOrCreateConnection(toUserId);
+	    if (conn == null) {
+	        System.err.println("❌ Cannot connect to peer: " + toUserId);
+	        return false;
+	    }
+	    // buildFileRequest 
+	    String json = P2PMessageProtocol.buildFileRequest(
+	        this.localUserId,    // from
+	        toUserId,            // to
+	        conversationId,      // conversationId
+	        fileName,            // fileName
+	        Long.valueOf(fileSize), // fileSize 
+	        fileId               // fileId
+	    );
+	    return conn.sendTcp(json);
+	}
 
     /**
      * Gửi call offer (WebRTC)

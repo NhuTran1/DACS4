@@ -13,6 +13,7 @@ import javafx.scene.paint.Color;
 import javafx.scene.shape.Circle;
 import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
+import javafx.stage.FileChooser;
 import javafx.stage.Stage;
 import model.Conversation;
 import model.Message;
@@ -21,6 +22,7 @@ import network.p2p.P2PManager;
 import network.p2p.PeerInfo;
 import service.ChatService;
 
+import java.io.File;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 
@@ -276,6 +278,7 @@ public class ChatWindow {
         inputArea.setStyle("-fx-background-color: #1a1d2e;");
 
         Button attachBtn = createIconButton("fas-paperclip", 40);
+        Button audioBtn  = createIconButton("fas-microphone", 40);
         Button emojiBtn = createIconButton("fas-smile", 40);
         
         messageInput = new TextField();
@@ -697,7 +700,7 @@ public class ChatWindow {
     }
 
     private void handleAttachment() {
-        showAlert("Feature", "File attachment - Coming soon");
+    	showAlert("File", "Sending file request...");
     }
 
     private void showEmojiPicker() {
@@ -711,4 +714,11 @@ public class ChatWindow {
     private void handleVideoCall() {
         showAlert("Feature", "Video call - Coming soon");
     }
+    
+    private void handleAudioRecord() {
+        showAlert("Feature", "Audio recording - Coming soon");
+    }
+    
+    
+
 }
