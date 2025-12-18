@@ -4,20 +4,20 @@ import protocol.P2PMessageProtocol;
 import service.ChatService;
 import model.Message;
 
+import java.io.File;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
-/**
- * P2PManager - Quản lý tất cả kết nối P2P
- * - Tạo/đóng connection tới peers
- * - Routing messages
- * - Lắng nghe incoming connections
- */
+/**	Router */
 public class P2PManager implements PeerConnection.P2PMessageHandler {
     private final Integer localUserId;
     private final Map<Integer, PeerConnection> activeConnections = new ConcurrentHashMap<>();
     private final ChatService chatService;
     private final PeerDiscoveryService discoveryService;
+    
+    // Managers
+    private final FileTransferManager fileTransferManager;
+    private final AudioCallManager audioCallManager;
     
     // Callback cho UI
     private P2PEventListener eventListener;
@@ -25,29 +25,45 @@ public class P2PManager implements PeerConnection.P2PMessageHandler {
     public interface P2PEventListener {
         void onChatMessageReceived(Integer conversationId, Message message);
         void onTypingReceived(Integer conversationId, Integer userId);
-        void onFileRequestReceived(Integer fromUser, String fileName, Integer fileSize);
-        void onCallOfferReceived(Integer fromUser, String sdp);
+        
+        // File transfer events
+        void onFileRequested(Integer fromUser, String fileId, String fileName, Long fileSize);
+        void onFileAccepted(Integer fromUser, String fileId);
+        void onFileRejected(Integer fromUser, String fileId, String reason);
+        void onFileProgress(String fileId, int progress, boolean isUpload);
+        void onFileComplete(String fileId, File file, boolean isUpload);
+        void onFileCanceled(String fileId, boolean isUpload);
+        void onFileError(String fileId, String error);
+        
+        // Audio call events
+        void onAudioCallRequested(Integer fromUser, String callId);
+        void onAudioCallAccepted(Integer fromUser, String callId);
+        void onAudioCallRejected(Integer fromUser, String callId, String reason);
+        void onAudioCallStarted(String callId);
+        void onAudioCallEnded(String callId);
+        void onAudioCallError(String callId, String error);
+        
         void onConnectionLost(Integer userId);
-
-        // New events for chat request flow
-        void onChatRequestReceived(Integer fromUser, String fromDisplayName);
-        void onChatRequestResponse(Integer fromUser, boolean accepted);
     }
 
     public P2PManager(Integer localUserId, ChatService chatService) {
         this.localUserId = localUserId;
         this.chatService = chatService;
         this.discoveryService = PeerDiscoveryService.getInstance();
+        
+        // Initialize managers
+        this.fileTransferManager = new FileTransferManager(this);
+        this.audioCallManager = new AudioCallManager(this);
+        
+        setupFileTransferListener();
+        setupAudioCallListener();
     }
 
     // ===== CONNECTION MANAGEMENT =====
 
-    /**
-     * Kết nối tới một peer
-     */
     public boolean connectToPeer(Integer userId) {
         if (activeConnections.containsKey(userId)) {
-            return true; // Đã kết nối rồi
+            return true;
         }
 
         PeerInfo peer = discoveryService.getPeer(userId);
@@ -68,9 +84,6 @@ public class P2PManager implements PeerConnection.P2PMessageHandler {
         return false;
     }
 
-    /**
-     * Ngắt kết nối với peer
-     */
     public void disconnectPeer(Integer userId) {
         PeerConnection conn = activeConnections.remove(userId);
         if (conn != null) {
@@ -79,16 +92,12 @@ public class P2PManager implements PeerConnection.P2PMessageHandler {
         }
     }
 
-    /**
-     * Lấy hoặc tạo connection tới peer
-     */
-    public PeerConnection getOrCreateConnection(Integer userId) {
+    private PeerConnection getOrCreateConnection(Integer userId) {
         PeerConnection conn = activeConnections.get(userId);
         if (conn != null && conn.isTcpConnected()) {
             return conn;
         }
 
-        // Nếu chưa có hoặc bị disconnect → tạo mới
         if (connectToPeer(userId)) {
             return activeConnections.get(userId);
         }
@@ -96,13 +105,17 @@ public class P2PManager implements PeerConnection.P2PMessageHandler {
         return null;
     }
 
-    // ===== SEND METHODS =====
+    public PeerConnection getConnection(Integer userId) {
+        return activeConnections.get(userId);
+    }
 
-    /**
-     * Gửi chat message tới peer trong conversation
-     */
+    public Integer getLocalUserId() {
+        return localUserId;
+    }
+
+    // ===== CHAT MESSAGES =====
+
     public boolean sendChatMessage(Integer conversationId, String content) {
-        // Lấy danh sách participants
         var participants = chatService.listParticipants(conversationId);
         if (participants == null || participants.isEmpty()) return false;
 
@@ -110,7 +123,7 @@ public class P2PManager implements PeerConnection.P2PMessageHandler {
         boolean success = true;
 
         for (var user : participants) {
-            if (user.getId().equals(localUserId)) continue; // Không gửi cho chính mình
+            if (user.getId().equals(localUserId)) continue;
 
             PeerConnection conn = getOrCreateConnection(user.getId());
             if (conn != null) {
@@ -120,16 +133,12 @@ public class P2PManager implements PeerConnection.P2PMessageHandler {
                 }
             } else {
                 success = false;
-                System.err.println("❌ Cannot connect to peer: " + user.getId());
             }
         }
 
         return success;
     }
 
-    /**
-     * Gửi typing indicator
-     */
     public void sendTypingStart(Integer conversationId) {
         var participants = chatService.listParticipants(conversationId);
         if (participants == null) return;
@@ -146,7 +155,7 @@ public class P2PManager implements PeerConnection.P2PMessageHandler {
         }
     }
 
-     public void sendTypingStop(Integer conversationId) {
+    public void sendTypingStop(Integer conversationId) {
         var participants = chatService.listParticipants(conversationId);
         if (participants == null) return;
 
@@ -162,61 +171,67 @@ public class P2PManager implements PeerConnection.P2PMessageHandler {
         }
     }
 
-    /**
-     * Gửi file request tới peer
-     */
-     public boolean sendFileRequest(Integer toUserId, Integer conversationId, String fileName, Long fileSize, String fileId) {
-	    PeerConnection conn = getOrCreateConnection(toUserId);
-	    if (conn == null) {
-	        System.err.println("❌ Cannot connect to peer: " + toUserId);
-	        return false;
-	    }
-	    // buildFileRequest 
-	    String json = P2PMessageProtocol.buildFileRequest(
-	        this.localUserId,    // from
-	        toUserId,            // to
-	        conversationId,      // conversationId
-	        fileName,            // fileName
-	        Long.valueOf(fileSize), // fileSize 
-	        fileId               // fileId
-	    );
-	    return conn.sendTcp(json);
-	}
+    // ===== FILE TRANSFER API =====
 
     /**
-     * Gửi call offer (WebRTC)
+     * Gửi file tới user
      */
-    public boolean sendCallOffer(Integer toUserId, String sdp) {
-        PeerConnection conn = getOrCreateConnection(toUserId);
-        if (conn == null) return false;
-
-        String json = P2PMessageProtocol.buildCallOffer(localUserId, toUserId, sdp);
-        return conn.sendTcp(json);
+    public String sendFile(Integer toUserId, File file) throws Exception {
+        return fileTransferManager.sendFileRequest(toUserId, file);
     }
 
     /**
-     * Gửi call answer
+     * Accept nhận file
      */
-    public boolean sendCallAnswer(Integer toUserId, String sdp) {
-        PeerConnection conn = getOrCreateConnection(toUserId);
-        if (conn == null) return false;
-
-        String json = P2PMessageProtocol.buildCallAnswer(localUserId, toUserId, sdp);
-        return conn.sendTcp(json);
+    public void acceptFile(String fileId) {
+        fileTransferManager.acceptFile(fileId);
     }
 
     /**
-     * Gửi call hangup
+     * Reject nhận file
      */
-    public boolean sendCallHangup(Integer toUserId) {
-        PeerConnection conn = activeConnections.get(toUserId);
-        if (conn == null) return false;
-
-        String json = P2PMessageProtocol.buildCallHangup(localUserId, toUserId);
-        return conn.sendTcp(json);
+    public void rejectFile(String fileId, String reason) {
+        fileTransferManager.rejectFile(fileId, reason);
     }
 
-    // ===== MESSAGE HANDLER (từ PeerConnection) =====
+    /**
+     * Hủy việc gửi file
+     */
+    public void cancelFileTransfer(String fileId, Integer toUserId) {
+        fileTransferManager.cancelOutgoingTransfer(fileId, toUserId);
+    }
+
+    // ===== AUDIO CALL API =====
+
+    /**
+     * Bắt đầu voice call
+     */
+    public String startAudioCall(Integer toUserId) throws Exception {
+        return audioCallManager.startCall(toUserId);
+    }
+
+    /**
+     * Accept voice call
+     */
+    public void acceptAudioCall(String callId) {
+        audioCallManager.acceptCall(callId);
+    }
+
+    /**
+     * Reject voice call
+     */
+    public void rejectAudioCall(String callId, String reason) {
+        audioCallManager.rejectCall(callId, reason);
+    }
+
+    /**
+     * End voice call
+     */
+    public void endAudioCall(String callId) {
+        audioCallManager.endCall(callId);
+    }
+
+    // ===== MESSAGE HANDLER =====
 
     @Override
     public void onMessageReceived(P2PMessageProtocol.Message msg) {
@@ -227,25 +242,40 @@ public class P2PManager implements PeerConnection.P2PMessageHandler {
 
             switch (type) {
                 case CHAT_MESSAGE -> handleChatMessage(msg);
-                
                 case TYPING_START -> handleTypingStart(msg);
                 case TYPING_STOP -> handleTypingStop(msg);
-                case FILE_REQUEST -> handleFileRequest(msg);
-                case CALL_OFFER -> handleCallOffer(msg);
-                case CALL_ANSWER -> handleCallAnswer(msg);
-                case CALL_HANGUP -> handleCallHangup(msg);
+                
+                // File transfer
+                case FILE_REQUEST -> fileTransferManager.handleFileRequest(msg);
+                case FILE_ACCEPT -> fileTransferManager.handleFileAccept(
+                    (String) msg.data.get("fileId"), msg.from);
+                case FILE_REJECT -> handleFileReject(msg);
+                case FILE_CHUNK -> fileTransferManager.handleFileChunk(msg);
+                case FILE_COMPLETE -> fileTransferManager.handleFileComplete(
+                    (String) msg.data.get("fileId"));
+                case FILE_CANCEL -> fileTransferManager.handleFileCancel(
+                    (String) msg.data.get("fileId"));
+                
+                // Audio call
+                case AUDIO_REQUEST -> audioCallManager.handleCallRequest(msg);
+                case AUDIO_ACCEPT -> audioCallManager.handleCallAccept(msg);
+                case AUDIO_REJECT -> handleAudioReject(msg);
+                case AUDIO_END -> audioCallManager.handleCallEnd(
+                    (String) msg.data.get("callId"));
+                
                 case MESSAGE_SEEN -> handleMessageSeen(msg);
+                
                 default -> System.out.println("⚠️ Unhandled message type: " + type);
             }
-        } catch (IllegalArgumentException e) {
-            System.err.println("❌ Invalid message type: " + msg.type);
+        } catch (Exception e) {
+            System.err.println("❌ Error handling message: " + e.getMessage());
+            e.printStackTrace();
         }
     }
 
     @Override
     public void onConnectionLost() {
         if (eventListener != null) {
-            // Tìm peer nào bị mất kết nối
             activeConnections.entrySet().removeIf(entry -> {
                 if (!entry.getValue().isTcpConnected()) {
                     eventListener.onConnectionLost(entry.getKey());
@@ -261,7 +291,6 @@ public class P2PManager implements PeerConnection.P2PMessageHandler {
     private void handleChatMessage(P2PMessageProtocol.Message msg) {
         if (eventListener == null) return;
 
-        // Lưu message vào DB
         String content = (String) msg.data.get("content");
         Message savedMsg = chatService.sendMessage(
             msg.conversationId, 
@@ -270,6 +299,7 @@ public class P2PManager implements PeerConnection.P2PMessageHandler {
             null
         );
 
+        //goij callback Ui để cập nhật giao diện 
         if (savedMsg != null) {
             eventListener.onChatMessageReceived(msg.conversationId, savedMsg);
         }
@@ -282,32 +312,25 @@ public class P2PManager implements PeerConnection.P2PMessageHandler {
     }
 
     private void handleTypingStop(P2PMessageProtocol.Message msg) {
-        // UI có thể xử lý việc ẩn "typing..." indicator
+        // UI có thể xử lý việc ẩn typing indicator
     }
 
-    private void handleFileRequest(P2PMessageProtocol.Message msg) {
-        if (eventListener == null) return;
-
-        String fileName = (String) msg.data.get("fileName");
-        Number fileSize = (Number) msg.data.get("fileSize");
-
-        eventListener.onFileRequestReceived(msg.from, fileName, fileSize.intValue());
+    private void handleFileReject(P2PMessageProtocol.Message msg) {
+        String fileId = (String) msg.data.get("fileId");
+        String reason = (String) msg.data.get("reason");
+        
+        if (eventListener != null) {
+            eventListener.onFileRejected(msg.from, fileId, reason);
+        }
     }
 
-    private void handleCallOffer(P2PMessageProtocol.Message msg) {
-        if (eventListener == null) return;
-
-        String sdp = (String) msg.data.get("sdp");
-        eventListener.onCallOfferReceived(msg.from, sdp);
-    }
-
-    private void handleCallAnswer(P2PMessageProtocol.Message msg) {
-        // Xử lý WebRTC answer
-        System.out.println("📞 Received call answer from " + msg.from);
-    }
-
-    private void handleCallHangup(P2PMessageProtocol.Message msg) {
-        System.out.println("📞 Call ended by " + msg.from);
+    private void handleAudioReject(P2PMessageProtocol.Message msg) {
+        String callId = (String) msg.data.get("callId");
+        String reason = (String) msg.data.get("reason");
+        
+        if (eventListener != null) {
+            eventListener.onAudioCallRejected(msg.from, callId, reason);
+        }
     }
 
     private void handleMessageSeen(P2PMessageProtocol.Message msg) {
@@ -315,6 +338,107 @@ public class P2PManager implements PeerConnection.P2PMessageHandler {
         if (messageId != null) {
             chatService.markMessageSeen(messageId.intValue(), msg.from);
         }
+    }
+
+    // ===== SETUP LISTENERS =====
+
+    private void setupFileTransferListener() {
+        fileTransferManager.setListener(new FileTransferManager.FileTransferListener() {
+            @Override
+            public void onFileRequested(Integer fromUser, String fileId, String fileName, Long fileSize) {
+                if (eventListener != null) {
+                    eventListener.onFileRequested(fromUser, fileId, fileName, fileSize);
+                }
+            }
+
+            @Override
+            public void onFileAccepted(Integer fromUser, String fileId) {
+                if (eventListener != null) {
+                    eventListener.onFileAccepted(fromUser, fileId);
+                }
+            }
+
+            @Override
+            public void onFileRejected(Integer fromUser, String fileId, String reason) {
+                if (eventListener != null) {
+                    eventListener.onFileRejected(fromUser, fileId, reason);
+                }
+            }
+
+            @Override
+            public void onFileProgress(String fileId, int progress, boolean isUpload) {
+                if (eventListener != null) {
+                    eventListener.onFileProgress(fileId, progress, isUpload);
+                }
+            }
+
+            @Override
+            public void onFileComplete(String fileId, File file, boolean isUpload) {
+                if (eventListener != null) {
+                    eventListener.onFileComplete(fileId, file, isUpload);
+                }
+            }
+
+            @Override
+            public void onFileCanceled(String fileId, boolean isUpload) {
+                if (eventListener != null) {
+                    eventListener.onFileCanceled(fileId, isUpload);
+                }
+            }
+
+            @Override
+            public void onFileError(String fileId, String error) {
+                if (eventListener != null) {
+                    eventListener.onFileError(fileId, error);
+                }
+            }
+        });
+    }
+
+    private void setupAudioCallListener() {
+        audioCallManager.setListener(new AudioCallManager.AudioCallListener() {
+            @Override
+            public void onCallRequested(Integer fromUser, String callId) {
+                if (eventListener != null) {
+                    eventListener.onAudioCallRequested(fromUser, callId);
+                }
+            }
+
+            @Override
+            public void onCallAccepted(Integer fromUser, String callId) {
+                if (eventListener != null) {
+                    eventListener.onAudioCallAccepted(fromUser, callId);
+                }
+            }
+
+            @Override
+            public void onCallRejected(Integer fromUser, String callId, String reason) {
+                if (eventListener != null) {
+                    eventListener.onAudioCallRejected(fromUser, callId, reason);
+                }
+            }
+
+            @Override
+            public void onCallStarted(String callId) {
+                if (eventListener != null) {
+                    eventListener.onAudioCallStarted(callId);
+                }
+            }
+
+            @Override
+            public void onCallEnded(String callId) {
+                if (eventListener != null) {
+                    eventListener.onAudioCallEnded(callId);
+                }
+            }
+
+            @Override
+            public void onCallError(String callId, String error) {
+                if (eventListener != null) {
+                    eventListener.onAudioCallError(callId, error);
+                }
+            }
+        });
     }
 
     // ===== SETTERS =====
@@ -326,6 +450,8 @@ public class P2PManager implements PeerConnection.P2PMessageHandler {
     // ===== CLEANUP =====
 
     public void shutdown() {
+        fileTransferManager.shutdown();
+        audioCallManager.shutdown();
         activeConnections.values().forEach(PeerConnection::closeAll);
         activeConnections.clear();
     }

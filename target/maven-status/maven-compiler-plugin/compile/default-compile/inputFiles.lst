@@ -3,6 +3,7 @@ C:\Users\ASUS\eclipse-workspace\chat\src\main\java\model\Friend.java
 C:\Users\ASUS\eclipse-workspace\chat\src\main\java\view\components\GlassCard.java
 C:\Users\ASUS\eclipse-workspace\chat\src\main\java\model\UserSession.java
 C:\Users\ASUS\eclipse-workspace\chat\src\main\java\view\ChatWindow.java
+C:\Users\ASUS\eclipse-workspace\chat\src\main\java\network\p2p\AudioCallManager.java
 C:\Users\ASUS\eclipse-workspace\chat\src\main\java\view\App.java
 C:\Users\ASUS\eclipse-workspace\chat\src\main\java\dao\UserSessionDao.java
 C:\Users\ASUS\eclipse-workspace\chat\src\main\java\model\ClientConnection.java
@@ -10,7 +11,6 @@ C:\Users\ASUS\eclipse-workspace\chat\src\main\java\view\components\GradientButto
 C:\Users\ASUS\eclipse-workspace\chat\src\main\java\network\tcp\TcpReaderThread.java
 C:\Users\ASUS\eclipse-workspace\chat\src\main\java\dao\MessageDao.java
 C:\Users\ASUS\eclipse-workspace\chat\src\main\java\network\tcp\TcpWriterThread.java
-C:\Users\ASUS\eclipse-workspace\chat\src\main\java\network\p2p\AudioRecorder.java
 C:\Users\ASUS\eclipse-workspace\chat\src\main\java\network\p2p\PeerInfo.java
 C:\Users\ASUS\eclipse-workspace\chat\src\main\java\view\components\AnimatedBackground.java
 C:\Users\ASUS\eclipse-workspace\chat\src\main\java\network\tcp\TcpClient.java

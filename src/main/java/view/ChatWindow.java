@@ -264,7 +264,7 @@ public class ChatWindow {
         Button infoBtn = createIconButton("fas-info-circle", 40);
 
         callBtn.setOnAction(e -> handleVoiceCall());
-        videoBtn.setOnAction(e -> handleVideoCall());
+        videoBtn.setOnAction(e -> handleVoiceCall());
         infoBtn.setOnAction(e -> showConversationInfo());
 
         header.getChildren().addAll(avatarStack, userInfo, spacer, callBtn, videoBtn, infoBtn);
@@ -383,6 +383,8 @@ public class ChatWindow {
 
         return btn;
     }
+    
+    
 
     // ===== MESSAGE RENDERING =====
     private void displayMessage(Message msg, boolean isOwn) {
@@ -590,74 +592,177 @@ public class ChatWindow {
 
     // ===== P2P LISTENERS =====
     private void setupP2PListeners() {
-        p2pManager.setEventListener(new P2PManager.P2PEventListener() {
-            @Override
-            public void onChatMessageReceived(Integer conversationId, Message message) {
-                Platform.runLater(() -> {
-                    if (currentConversation != null && 
-                        currentConversation.getId().equals(conversationId)) {
-                        displayMessage(message, false);
-                    }
-                    loadFriendsWithStatus();
-                });
-            }
+    	 p2pManager.setEventListener(new P2PManager.P2PEventListener() {
+    	        @Override
+    	        public void onChatMessageReceived(Integer conversationId, Message message) {
+    	            Platform.runLater(() -> {
+    	                if (currentConversation != null && 
+    	                    currentConversation.getId().equals(conversationId)) {
+    	                    displayMessage(message, false);
+    	                }
+    	                //loadConversations();
+    	            });
+    	        }
 
-            @Override
-            public void onTypingReceived(Integer conversationId, Integer userId) {
-                Platform.runLater(() -> {
-                    if (currentConversation != null && 
-                        currentConversation.getId().equals(conversationId)) {
-                        Users user = chatService.getUserById(userId);
-                        typingIndicator.setText(user.getDisplayName() + " is typing...");
-                        typingIndicator.setVisible(true);
-                        
-                        new java.util.Timer().schedule(new java.util.TimerTask() {
-                            @Override
-                            public void run() {
-                                Platform.runLater(() -> typingIndicator.setVisible(false));
-                            }
-                        }, 3000);
-                    }
-                });
-            }
+    	        @Override
+    	        public void onTypingReceived(Integer conversationId, Integer userId) {
+    	            Platform.runLater(() -> {
+    	                if (currentConversation != null && 
+    	                    currentConversation.getId().equals(conversationId)) {
+    	                    Users user = chatService.getUserById(userId);
+    	                    typingIndicator.setText(user.getDisplayName() + " is typing...");
+    	                    typingIndicator.setVisible(true);
+    	                    
+    	                    new Thread(() -> {
+    	                        try {
+    	                            Thread.sleep(3000);
+    	                            Platform.runLater(() -> typingIndicator.setVisible(false));
+    	                        } catch (InterruptedException ignored) {}
+    	                    }).start();
+    	                }
+    	            });
+    	        }
 
-            @Override
-            public void onFileRequestReceived(Integer fromUser, String fileName, Integer fileSize) {
-                Platform.runLater(() -> 
-                    showAlert("File Request", 
-                        chatService.getUserById(fromUser).getDisplayName() + 
-                        " wants to send: " + fileName)
-                );
-            }
+    	        // ===== FILE TRANSFER EVENTS =====
+    	        
+    	        @Override
+    	        public void onFileRequested(Integer fromUser, String fileId, String fileName, Long fileSize) {
+    	            Platform.runLater(() -> {
+    	                Users sender = chatService.getUserById(fromUser);
+    	                String senderName = sender != null ? sender.getDisplayName() : "User" + fromUser;
+    	                
+    	                Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
+    	                alert.setTitle("File Transfer Request");
+    	                alert.setHeaderText(senderName + " wants to send you a file");
+    	                alert.setContentText("File: " + fileName + "\nSize: " + formatFileSize(fileSize) + 
+    	                                   "\n\nDo you want to accept?");
+    	                
+    	                alert.showAndWait().ifPresent(response -> {
+    	                    if (response == ButtonType.OK) {
+    	                        p2pManager.acceptFile(fileId);
+    	                        showFileProgressDialog(fileId, fileName, false);
+    	                    } else {
+    	                        p2pManager.rejectFile(fileId, "User declined");
+    	                    }
+    	                });
+    	            });
+    	        }
 
-            @Override
-            public void onCallOfferReceived(Integer fromUser, String sdp) {
-                Platform.runLater(() -> 
-                    showAlert("Incoming Call", 
-                        chatService.getUserById(fromUser).getDisplayName() + " is calling...")
-                );
-            }
+    	        @Override
+    	        public void onFileAccepted(Integer fromUser, String fileId) {
+    	            Platform.runLater(() -> {
+    	                System.out.println("✅ File accepted by peer");
+    	            });
+    	        }
 
-            @Override
-            public void onConnectionLost(Integer userId) {
-                Platform.runLater(() -> {
-                    friendListView.refresh();
-                });
-            }
+    	        @Override
+    	        public void onFileRejected(Integer fromUser, String fileId, String reason) {
+    	            Platform.runLater(() -> {
+    	                closeFileProgressDialog(fileId);
+    	                showAlert("File Rejected", "The recipient declined the file: " + reason);
+    	            });
+    	        }
 
-			@Override
-			public void onChatRequestReceived(Integer fromUser, String fromDisplayName) {
-				// TODO Auto-generated method stub
-				
-			}
+    	        @Override
+    	        public void onFileProgress(String fileId, int progress, boolean isUpload) {
+    	            updateFileProgress(fileId, progress);
+    	        }
 
-			@Override
-			public void onChatRequestResponse(Integer fromUser, boolean accepted) {
-				// TODO Auto-generated method stub
-				
-			}
-        });
-    }
+    	        @Override
+    	        public void onFileComplete(String fileId, File file, boolean isUpload) {
+    	            Platform.runLater(() -> {
+    	                closeFileProgressDialog(fileId);
+    	                
+    	                if (isUpload) {
+    	                    showAlert("Success", "File sent successfully!");
+    	                } else {
+    	                    showAlert("Success", "File received: " + file.getName() + 
+    	                            "\nSaved to: " + file.getAbsolutePath());
+    	                }
+    	            });
+    	        }
+
+    	        @Override
+    	        public void onFileCanceled(String fileId, boolean isUpload) {
+    	            Platform.runLater(() -> {
+    	                closeFileProgressDialog(fileId);
+    	                showAlert("Canceled", "File transfer was canceled");
+    	            });
+    	        }
+
+    	        @Override
+    	        public void onFileError(String fileId, String error) {
+    	            Platform.runLater(() -> {
+    	                closeFileProgressDialog(fileId);
+    	                showAlert("Error", "File transfer failed: " + error);
+    	            });
+    	        }
+
+    	        // ===== AUDIO CALL EVENTS =====
+    	        
+    	        @Override
+    	        public void onAudioCallRequested(Integer fromUser, String callId) {
+    	            Platform.runLater(() -> {
+    	                Users caller = chatService.getUserById(fromUser);
+    	                String callerName = caller != null ? caller.getDisplayName() : "User" + fromUser;
+    	                
+    	                Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
+    	                alert.setTitle("Incoming Call");
+    	                alert.setHeaderText(callerName + " is calling you");
+    	                alert.setContentText("Do you want to answer?");
+    	                
+    	                alert.showAndWait().ifPresent(response -> {
+    	                    if (response == ButtonType.OK) {
+    	                        p2pManager.acceptAudioCall(callId);
+    	                        showAudioCallDialog(callId, "Connected", true);
+    	                    } else {
+    	                        p2pManager.rejectAudioCall(callId, "User declined");
+    	                    }
+    	                });
+    	            });
+    	        }
+
+    	        @Override
+    	        public void onAudioCallAccepted(Integer fromUser, String callId) {
+    	            updateAudioCallStatus(callId, "Connected");
+    	        }
+
+    	        @Override
+    	        public void onAudioCallRejected(Integer fromUser, String callId, String reason) {
+    	            Platform.runLater(() -> {
+    	                closeAudioCallDialog(callId);
+    	                showAlert("Call Rejected", "The recipient declined the call");
+    	            });
+    	        }
+
+    	        @Override
+    	        public void onAudioCallStarted(String callId) {
+    	            updateAudioCallStatus(callId, "Active");
+    	        }
+
+    	        @Override
+    	        public void onAudioCallEnded(String callId) {
+    	            Platform.runLater(() -> {
+    	                closeAudioCallDialog(callId);
+    	                showAlert("Call Ended", "The call has ended");
+    	            });
+    	        }
+
+    	        @Override
+    	        public void onAudioCallError(String callId, String error) {
+    	            Platform.runLater(() -> {
+    	                closeAudioCallDialog(callId);
+    	                showAlert("Call Error", error);
+    	            });
+    	        }
+
+    	        @Override
+    	        public void onConnectionLost(Integer userId) {
+    	            System.out.println("Connection lost with user: " + userId);
+    	        }
+    	    });
+    	};
+    
 
     // ===== DIALOGS & ALERTS =====
     private void showSettingsDialog() {
@@ -700,16 +805,238 @@ public class ChatWindow {
     }
 
     private void handleAttachment() {
-    	showAlert("File", "Sending file request...");
+    	if (currentConversation == null) {
+            showAlert("Error", "Please select a conversation first");
+            return;
+        }
+
+        // File chooser
+        javafx.stage.FileChooser fileChooser = new javafx.stage.FileChooser();
+        fileChooser.setTitle("Select File to Send");
+        
+        // Add filters
+        fileChooser.getExtensionFilters().addAll(
+            new javafx.stage.FileChooser.ExtensionFilter("All Files", "*.*"),
+            new javafx.stage.FileChooser.ExtensionFilter("Images", "*.png", "*.jpg", "*.jpeg", "*.gif"),
+            new javafx.stage.FileChooser.ExtensionFilter("Documents", "*.pdf", "*.doc", "*.docx", "*.txt"),
+            new javafx.stage.FileChooser.ExtensionFilter("Archives", "*.zip", "*.rar", "*.7z")
+        );
+
+        File selectedFile = fileChooser.showOpenDialog(stage);
+        if (selectedFile != null) {
+            sendFileToConversation(selectedFile);
+        }
     }
 
+ // Thêm method gửi file:
+    private void sendFileToConversation(File file) {
+        if (currentConversation == null) return;
+        
+        // Lấy participants trong conversation
+        List<Users> participants = chatService.listParticipants(currentConversation.getId());
+        
+        // Tìm peer (không phải chính mình)
+        Integer targetUserId = participants.stream()
+            .map(Users::getId)
+            .filter(id -> !id.equals(currentUserId))
+            .findFirst()
+            .orElse(null);
+        
+        if (targetUserId == null) {
+            showAlert("Error", "Cannot find recipient");
+            return;
+        }
+
+        try {
+            String fileId = p2pManager.sendFile(targetUserId, file);
+            
+            // Show progress dialog
+            showFileProgressDialog(fileId, file.getName(), true);
+            
+        } catch (Exception e) {
+            showAlert("Error", "Failed to send file: " + e.getMessage());
+        }
+    }
+
+    // Thêm dialog hiển thị progress:
+    private Map<String, ProgressDialog> fileProgressDialogs = new HashMap<>();
+
+    private void showFileProgressDialog(String fileId, String fileName, boolean isUpload) {
+        Platform.runLater(() -> {
+            ProgressDialog dialog = new ProgressDialog(fileName, isUpload);
+            fileProgressDialogs.put(fileId, dialog);
+            dialog.show();
+        });
+    }
+    
+    private void updateFileProgress(String fileId, int progress) {
+        Platform.runLater(() -> {
+            ProgressDialog dialog = fileProgressDialogs.get(fileId);
+            if (dialog != null) {
+                dialog.updateProgress(progress);
+            }
+        });
+    }
+
+    private void closeFileProgressDialog(String fileId) {
+        Platform.runLater(() -> {
+            ProgressDialog dialog = fileProgressDialogs.remove(fileId);
+            if (dialog != null) {
+                dialog.close();
+            }
+        });
+    }
+    
     private void showEmojiPicker() {
         showAlert("Feature", "Emoji picker - Coming soon");
     }
 
     private void handleVoiceCall() {
-        showAlert("Feature", "Voice call - Coming soon");
-    }
+    	 if (currentConversation == null) {
+    	        showAlert("Error", "Please select a conversation first");
+    	        return;
+    	    }
+
+    	    // Lấy peer user
+    	    List<Users> participants = chatService.listParticipants(currentConversation.getId());
+    	    Integer targetUserId = participants.stream()
+    	        .map(Users::getId)
+    	        .filter(id -> !id.equals(currentUserId))
+    	        .findFirst()
+    	        .orElse(null);
+    	    
+    	    if (targetUserId == null) {
+    	        showAlert("Error", "Cannot find recipient");
+    	        return;
+    	    }
+
+    	    try {
+    	        String callId = p2pManager.startAudioCall(targetUserId);
+    	        showAudioCallDialog(callId, "Calling...", false);
+    	        
+    	    } catch (Exception e) {
+    	        showAlert("Error", "Failed to start call: " + e.getMessage());
+    	    }
+    	}
+
+    	// Audio call dialog
+    	private Map<String, AudioCallDialog> audioCallDialogs = new HashMap<>();
+
+    	private void showAudioCallDialog(String callId, String status, boolean isIncoming) {
+    	    Platform.runLater(() -> {
+    	        AudioCallDialog dialog = new AudioCallDialog(callId, status, isIncoming);
+    	        audioCallDialogs.put(callId, dialog);
+    	        dialog.show();
+    	    });
+    	}
+
+    	private void updateAudioCallStatus(String callId, String status) {
+    	    Platform.runLater(() -> {
+    	        AudioCallDialog dialog = audioCallDialogs.get(callId);
+    	        if (dialog != null) {
+    	            dialog.updateStatus(status);
+    	        }
+    	    });
+    	}
+
+    	private void closeAudioCallDialog(String callId) {
+    	    Platform.runLater(() -> {
+    	        AudioCallDialog dialog = audioCallDialogs.remove(callId);
+    	        if (dialog != null) {
+    	            dialog.close();
+    	        }
+    	    });
+    	}
+
+    	// Helper method
+    	private String formatFileSize(Long bytes) {
+    	    if (bytes < 1024) return bytes + " B";
+    	    if (bytes < 1024 * 1024) return String.format("%.2f KB", bytes / 1024.0);
+    	    return String.format("%.2f MB", bytes / (1024.0 * 1024.0));
+    	}
+
+    	// ===== INNER CLASSES FOR DIALOGS =====
+
+    	private class ProgressDialog extends Stage {
+    	    private ProgressBar progressBar;
+    	    private Label statusLabel;
+    	    
+    	    public ProgressDialog(String fileName, boolean isUpload) {
+    	        setTitle(isUpload ? "Sending File" : "Receiving File");
+    	        setWidth(400);
+    	        setHeight(150);
+    	        
+    	        VBox root = new VBox(15);
+    	        root.setPadding(new Insets(20));
+    	        root.setAlignment(Pos.CENTER);
+    	        root.setStyle("-fx-background-color: #16213e;");
+    	        
+    	        Label fileLabel = new Label(fileName);
+    	        fileLabel.setTextFill(Color.web("#eaeaea"));
+    	        fileLabel.setFont(Font.font("System", FontWeight.BOLD, 14));
+    	        
+    	        progressBar = new ProgressBar(0);
+    	        progressBar.setPrefWidth(350);
+    	        
+    	        statusLabel = new Label("0%");
+    	        statusLabel.setTextFill(Color.web("#aaa"));
+    	        
+    	        Button cancelBtn = new Button("Cancel");
+    	        cancelBtn.setOnAction(e -> close());
+    	        
+    	        root.getChildren().addAll(fileLabel, progressBar, statusLabel, cancelBtn);
+    	        
+    	        Scene scene = new Scene(root);
+    	        setScene(scene);
+    	    }
+    	    
+    	    public void updateProgress(int progress) {
+    	        Platform.runLater(() -> {
+    	            progressBar.setProgress(progress / 100.0);
+    	            statusLabel.setText(progress + "%");
+    	        });
+    	    }
+    	}
+
+    	private class AudioCallDialog extends Stage {
+    	    private Label statusLabel;
+    	    private String callId;
+    	    
+    	    public AudioCallDialog(String callId, String status, boolean isIncoming) {
+    	        this.callId = callId;
+    	        setTitle(isIncoming ? "Incoming Call" : "Outgoing Call");
+    	        setWidth(300);
+    	        setHeight(200);
+    	        
+    	        VBox root = new VBox(20);
+    	        root.setPadding(new Insets(20));
+    	        root.setAlignment(Pos.CENTER);
+    	        root.setStyle("-fx-background-color: #16213e;");
+    	        
+    	        Label callIcon = new Label("📞");
+    	        callIcon.setFont(Font.font(48));
+    	        
+    	        statusLabel = new Label(status);
+    	        statusLabel.setTextFill(Color.web("#eaeaea"));
+    	        statusLabel.setFont(Font.font("System", FontWeight.BOLD, 16));
+    	        
+    	        Button endBtn = new Button("End Call");
+    	        endBtn.setStyle("-fx-background-color: #d32f2f; -fx-text-fill: white;");
+    	        endBtn.setOnAction(e -> {
+    	            p2pManager.endAudioCall(callId);
+    	            close();
+    	        });
+    	        
+    	        root.getChildren().addAll(callIcon, statusLabel, endBtn);
+    	        
+    	        Scene scene = new Scene(root);
+    	        setScene(scene);
+    	    }
+    	    
+    	    public void updateStatus(String status) {
+    	        Platform.runLater(() -> statusLabel.setText(status));
+    	    }
+    	    
 
     private void handleVideoCall() {
         showAlert("Feature", "Video call - Coming soon");
@@ -721,4 +1048,5 @@ public class ChatWindow {
     
     
 
+}
 }

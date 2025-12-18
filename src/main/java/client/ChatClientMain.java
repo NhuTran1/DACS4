@@ -8,6 +8,7 @@ import service.ChatService;
 import dao.UserDao;
 import model.Users;
 
+import java.io.File;
 import java.util.Scanner;
 
 /**
@@ -64,29 +65,85 @@ public class ChatClientMain {
             }
 
             @Override
-            public void onFileRequestReceived(Integer fromUser, String fileName, Integer fileSize) {
-                System.out.println("📁 " + getUserName(fromUser) + " wants to send: " + fileName + 
-                    " (" + formatFileSize(fileSize) + ")");
-            }
-
-            @Override
-            public void onCallOfferReceived(Integer fromUser, String sdp) {
-                System.out.println("📞 Incoming call from " + getUserName(fromUser));
-            }
-
-            @Override
             public void onConnectionLost(Integer userId) {
                 System.out.println("⚠️  Connection lost with " + getUserName(userId));
             }
 
+
 			@Override
-			public void onChatRequestReceived(Integer fromUser, String fromDisplayName) {
+			public void onFileRequested(Integer fromUser, String fileId, String fileName, Long fileSize) {
 				// TODO Auto-generated method stub
 				
 			}
 
 			@Override
-			public void onChatRequestResponse(Integer fromUser, boolean accepted) {
+			public void onFileAccepted(Integer fromUser, String fileId) {
+				// TODO Auto-generated method stub
+				
+			}
+
+			@Override
+			public void onFileRejected(Integer fromUser, String fileId, String reason) {
+				// TODO Auto-generated method stub
+				
+			}
+
+			@Override
+			public void onFileProgress(String fileId, int progress, boolean isUpload) {
+				// TODO Auto-generated method stub
+				
+			}
+
+			@Override
+			public void onFileComplete(String fileId, File file, boolean isUpload) {
+				// TODO Auto-generated method stub
+				
+			}
+
+			@Override
+			public void onFileCanceled(String fileId, boolean isUpload) {
+				// TODO Auto-generated method stub
+				
+			}
+
+			@Override
+			public void onFileError(String fileId, String error) {
+				// TODO Auto-generated method stub
+				
+			}
+
+			@Override
+			public void onAudioCallRequested(Integer fromUser, String callId) {
+				// TODO Auto-generated method stub
+				
+			}
+
+			@Override
+			public void onAudioCallAccepted(Integer fromUser, String callId) {
+				// TODO Auto-generated method stub
+				
+			}
+
+			@Override
+			public void onAudioCallRejected(Integer fromUser, String callId, String reason) {
+				// TODO Auto-generated method stub
+				
+			}
+
+			@Override
+			public void onAudioCallStarted(String callId) {
+				// TODO Auto-generated method stub
+				
+			}
+
+			@Override
+			public void onAudioCallEnded(String callId) {
+				// TODO Auto-generated method stub
+				
+			}
+
+			@Override
+			public void onAudioCallError(String callId, String error) {
 				// TODO Auto-generated method stub
 				
 			}

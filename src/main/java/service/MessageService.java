@@ -31,7 +31,7 @@ public class MessageService {
                                                .stream()
                                                .anyMatch(u -> u.getId().equals(senderId));
 
-        if (!isParticipant) return null; // Không có quyền gửi
+        if (!isParticipant) return null; 
 
         //Check sender co ton tại ko 
         Users sender = userDao.findById(senderId);

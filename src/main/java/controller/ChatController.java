@@ -192,7 +192,8 @@ public class ChatController {
                     return;
                 }
 
-                // 3. Tạo group conversation (giả sử bạn sẽ implement method này trong ChatService)
+                // 3. Tạo group conversation 
+                
                 Conversation group = createGroupInDatabase(groupName.trim(), memberIds);
                 
                 if (group != null) {

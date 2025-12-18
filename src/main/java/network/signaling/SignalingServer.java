@@ -130,7 +130,7 @@ public class SignalingServer {
             }
 
             String ip = socket.getInetAddress().getHostAddress();
-            Integer userId = user.getId();                // <-- dùng Long (khớp với PeerInfo)
+            Integer userId = user.getId();                
 
             if (userId == null) {
                 sendError("User id is null");
@@ -213,7 +213,7 @@ public class SignalingServer {
 
     //Test
     public static void main(String[] args) {
-        int port = 7002; // hoặc đọc từ args
+        int port = 7002; 
         SignalingServer server = new SignalingServer(port);
         try {
             server.start();

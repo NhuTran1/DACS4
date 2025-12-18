@@ -13,8 +13,9 @@ import java.util.HashMap;
 import java.util.HashSet;
 import com.google.gson.Gson;
 
+//luu va truy van thong tin peer list ở client 
 public class PeerDiscoveryService {
-	 private static final PeerDiscoveryService instance = new PeerDiscoveryService();
+	private static final PeerDiscoveryService instance = new PeerDiscoveryService();
 
     // Map: userId -> PeerInfo
     private final Map<Integer, PeerInfo> activePeers = new ConcurrentHashMap<>();

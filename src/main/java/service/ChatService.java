@@ -16,7 +16,6 @@ public class ChatService {
 	    private final UserService userService = new UserService();
 	    private final FriendService friendService = new FriendService();
 	    private final FriendDao friendDao = new FriendDao();
-//	    private final RealtimeService realtimeService = new RealtimeService();
 	    
 	 // 1. USER
 	    public Users getUserById(Integer id) {
