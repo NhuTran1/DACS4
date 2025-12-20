@@ -2,6 +2,8 @@ package view;
 
 import client.ClientManager;
 import controller.ChatController;
+import javafx.animation.FadeTransition;
+import javafx.animation.ScaleTransition;
 import javafx.application.Platform;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
@@ -15,6 +17,7 @@ import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
 import javafx.stage.FileChooser;
 import javafx.stage.Stage;
+import javafx.util.Duration;
 import model.Conversation;
 import model.Message;
 import model.Users;
@@ -385,57 +388,162 @@ public class ChatWindow {
     }
     
     
+ // ===== NEW: Create file message box =====
+    private VBox createFileMessageBox(String fileUrl, boolean isOwn) {
+        VBox fileBox = new VBox(8);
+        fileBox.setStyle("""
+            -fx-background-color: rgba(0, 0, 0, 0.2);
+            -fx-background-radius: 10;
+            -fx-padding: 12;
+        """);
+        
+        // Parse file info from URL
+        String fileName = extractFileName(fileUrl);
+        String fileSize = extractFileSize(fileUrl);
+        
+        HBox fileHeader = new HBox(10);
+        fileHeader.setAlignment(Pos.CENTER_LEFT);
+        
+        // File icon
+        FontIcon fileIcon = new FontIcon("fas-file");
+        fileIcon.setIconSize(30);
+        fileIcon.setIconColor(Color.web("#4ade80"));
+        
+        VBox fileInfo = new VBox(3);
+        Label nameLabel = new Label(fileName);
+        nameLabel.setFont(Font.font("System", FontWeight.BOLD, 14));
+        nameLabel.setTextFill(Color.WHITE);
+        nameLabel.setMaxWidth(400);
+        nameLabel.setStyle("-fx-text-overflow: ellipsis;");
+        
+        Label sizeLabel = new Label(fileSize);
+        sizeLabel.setFont(Font.font(12));
+        sizeLabel.setTextFill(Color.web("#aaaaaa"));
+        
+        fileInfo.getChildren().addAll(nameLabel, sizeLabel);
+        
+        fileHeader.getChildren().addAll(fileIcon, fileInfo);
+        
+        // Download button
+        Button downloadBtn = new Button("Open File");
+        downloadBtn.setStyle("""
+            -fx-background-color: #4ade80;
+            -fx-text-fill: white;
+            -fx-background-radius: 8;
+            -fx-padding: 8 16;
+            -fx-cursor: hand;
+            -fx-font-weight: bold;
+        """);
+        
+        downloadBtn.setOnAction(e -> openFile(fileUrl));
+        
+        fileBox.getChildren().addAll(fileHeader, downloadBtn);
+        
+        return fileBox;
+    }
+
+    // ===== HELPER: Extract file name from URL =====
+    private String extractFileName(String fileUrl) {
+        try {
+            // Format: file://filename|size
+            String[] parts = fileUrl.replace("file://", "").split("\\|");
+            return parts[0];
+        } catch (Exception e) {
+            return "Unknown File";
+        }
+    }
+
+    // ===== HELPER: Extract file size from URL =====
+    private String extractFileSize(String fileUrl) {
+        try {
+            String[] parts = fileUrl.replace("file://", "").split("\\|");
+            if (parts.length > 1) {
+                return parts[1];
+            }
+        } catch (Exception e) {}
+        return "";
+    }
+
+    // ===== HELPER: Open file =====
+    private void openFile(String fileUrl) {
+        try {
+            String fileName = extractFileName(fileUrl);
+            File file = new File("file_transfers", fileName);
+            
+            if (file.exists()) {
+                // Open file with default application
+                if (java.awt.Desktop.isDesktopSupported()) {
+                    java.awt.Desktop.getDesktop().open(file);
+                } else {
+                    showAlert("Error", "Cannot open file on this system");
+                }
+            } else {
+                showAlert("Error", "File not found: " + file.getAbsolutePath());
+            }
+        } catch (Exception e) {
+            showAlert("Error", "Failed to open file: " + e.getMessage());
+        }
+    }
+    
 
     // ===== MESSAGE RENDERING =====
     private void displayMessage(Message msg, boolean isOwn) {
-        HBox messageBox = new HBox(12);
-        messageBox.setPadding(new Insets(5, 0, 5, 0));
-        messageBox.setAlignment(isOwn ? Pos.CENTER_RIGHT : Pos.CENTER_LEFT);
+    HBox messageBox = new HBox(12);
+    messageBox.setPadding(new Insets(5, 0, 5, 0));
+    messageBox.setAlignment(isOwn ? Pos.CENTER_RIGHT : Pos.CENTER_LEFT);
 
-        if (!isOwn) {
-            // Avatar for received messages
-            Circle avatar = new Circle(18);
-            avatar.setFill(Color.web("#667eea"));
-            messageBox.getChildren().add(avatar);
-        }
+    if (!isOwn) {
+        // Avatar for received messages
+        Circle avatar = new Circle(18);
+        avatar.setFill(Color.web("#667eea"));
+        messageBox.getChildren().add(avatar);
+    }
 
-        VBox bubble = new VBox(8);
-        bubble.setMaxWidth(600);
-        bubble.setPadding(new Insets(14, 18, 14, 18));
-        
-        if (isOwn) {
-            bubble.setStyle("""
-                -fx-background-color: linear-gradient(to right, #667eea, #764ba2);
-                -fx-background-radius: 20 20 4 20;
-            """);
-        } else {
-            bubble.setStyle("""
-                -fx-background-color: #1a1d2e;
-                -fx-background-radius: 20 20 20 4;
-            """);
-        }
+    VBox bubble = new VBox(8);
+    bubble.setMaxWidth(600);
+    bubble.setPadding(new Insets(14, 18, 14, 18));
+    
+    if (isOwn) {
+        bubble.setStyle("""
+            -fx-background-color: linear-gradient(to right, #667eea, #764ba2);
+            -fx-background-radius: 20 20 4 20;
+        """);
+    } else {
+        bubble.setStyle("""
+            -fx-background-color: #1a1d2e;
+            -fx-background-radius: 20 20 20 4;
+        """);
+    }
 
-        // Message content
+    // Check if message has file attachment
+    if (msg.getImageUrl() != null && msg.getImageUrl().startsWith("file://")) {
+        // This is a file message
+        VBox fileBox = createFileMessageBox(msg.getImageUrl(), isOwn);
+        bubble.getChildren().add(fileBox);
+    } else {
+        // Regular text message
         Label contentLabel = new Label(msg.getContent());
         contentLabel.setWrapText(true);
         contentLabel.setFont(Font.font(15));
         contentLabel.setTextFill(Color.web("#ffffff"));
-
-        // Timestamp
-        Label timeLabel = new Label(msg.getCreatedAt().format(TIME_FORMATTER));
-        timeLabel.setFont(Font.font(11));
-        timeLabel.setTextFill(isOwn ? Color.web("#e0e0e0") : Color.web("#6b7280"));
-
-        bubble.getChildren().addAll(contentLabel, timeLabel);
-        messageBox.getChildren().add(bubble);
-        
-        messageArea.getChildren().add(messageBox);
-        
-        // Auto scroll
-        Platform.runLater(() -> 
-            messageScrollPane.setVvalue(messageScrollPane.getVmax())
-        );
+        bubble.getChildren().add(contentLabel);
     }
+
+    // Timestamp
+    Label timeLabel = new Label(msg.getCreatedAt().format(TIME_FORMATTER));
+    timeLabel.setFont(Font.font(11));
+    timeLabel.setTextFill(isOwn ? Color.web("#e0e0e0") : Color.web("#6b7280"));
+
+    bubble.getChildren().add(timeLabel);
+    messageBox.getChildren().add(bubble);
+    
+    messageArea.getChildren().add(messageBox);
+    
+    // Auto scroll
+    Platform.runLater(() -> 
+        messageScrollPane.setVvalue(messageScrollPane.getVmax())
+    );
+}
 
     // ===== FRIEND CELL =====
     private class FriendCell extends ListCell<Users> {
@@ -631,11 +739,23 @@ public class ChatWindow {
     	                Users sender = chatService.getUserById(fromUser);
     	                String senderName = sender != null ? sender.getDisplayName() : "User" + fromUser;
     	                
-    	                Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
-    	                alert.setTitle("File Transfer Request");
+    	                // Custom styled alert
+    	                Alert alert = createStyledAlert(Alert.AlertType.CONFIRMATION);
+    	                alert.setTitle("Incoming File");
     	                alert.setHeaderText(senderName + " wants to send you a file");
-    	                alert.setContentText("File: " + fileName + "\nSize: " + formatFileSize(fileSize) + 
-    	                                   "\n\nDo you want to accept?");
+    	                
+    	                // Content with file info
+    	                VBox content = new VBox(10);
+    	                content.setPadding(new Insets(15));
+    	                
+    	                Label fileNameLabel = new Label("📄 " + fileName);
+    	                fileNameLabel.setFont(Font.font("System", FontWeight.BOLD, 14));
+    	                
+    	                Label sizeLabel = new Label("Size: " + formatFileSize(fileSize));
+    	                sizeLabel.setFont(Font.font(13));
+    	                
+    	                content.getChildren().addAll(fileNameLabel, sizeLabel);
+    	                alert.getDialogPane().setContent(content);
     	                
     	                alert.showAndWait().ifPresent(response -> {
     	                    if (response == ButtonType.OK) {
@@ -652,6 +772,7 @@ public class ChatWindow {
     	        public void onFileAccepted(Integer fromUser, String fileId) {
     	            Platform.runLater(() -> {
     	                System.out.println("✅ File accepted by peer");
+    	                // Progress dialog already shown
     	            });
     	        }
 
@@ -674,10 +795,25 @@ public class ChatWindow {
     	                closeFileProgressDialog(fileId);
     	                
     	                if (isUpload) {
-    	                    showAlert("Success", "File sent successfully!");
+    	                    // File sent successfully
+    	                    showSuccessNotification("File sent successfully!");
     	                } else {
-    	                    showAlert("Success", "File received: " + file.getName() + 
-    	                            "\nSaved to: " + file.getAbsolutePath());
+    	                    // File received - save to database and display
+    	                    if (currentConversation != null) {
+    	                        String fileUrl = "file://" + file.getName() + "|" + formatFileSize(file.length());
+    	                        Message fileMsg = chatService.sendMessage(
+    	                            currentConversation.getId(),
+    	                            currentChatUser.getId(), // From sender
+    	                            "[File] " + file.getName(),
+    	                            fileUrl
+    	                        );
+    	                        
+    	                        if (fileMsg != null) {
+    	                            displayMessage(fileMsg, false);
+    	                        }
+    	                    }
+    	                    
+    	                    showSuccessNotification("File received: " + file.getName());
     	                }
     	            });
     	        }
@@ -698,6 +834,70 @@ public class ChatWindow {
     	            });
     	        }
 
+    	     // ===== HELPER: Create styled alert =====
+    	        private Alert createStyledAlert(Alert.AlertType type) {
+    	            Alert alert = new Alert(type);
+    	            
+    	            DialogPane dialogPane = alert.getDialogPane();
+    	            dialogPane.setStyle("""
+    	                -fx-background-color: #1a1d2e;
+    	                -fx-border-color: #667eea;
+    	                -fx-border-width: 1;
+    	                -fx-border-radius: 10;
+    	            """);
+    	            
+    	            // Style header
+    	            dialogPane.lookup(".header-panel").setStyle("""
+    	                -fx-background-color: #262b40;
+    	            """);
+    	            
+    	            // Style content
+    	            dialogPane.lookup(".content").setStyle("""
+    	                -fx-background-color: #1a1d2e;
+    	            """);
+    	            
+    	            // Style labels
+    	            for (javafx.scene.Node node : dialogPane.getChildren()) {
+    	                if (node instanceof Label) {
+    	                    ((Label) node).setTextFill(Color.web("#ffffff"));
+    	                }
+    	            }
+    	            
+    	            return alert;
+    	        }
+
+    	        // ===== HELPER: Show success notification =====
+    	        private void showSuccessNotification(String message) {
+    	            // Create temporary notification
+    	            Label notification = new Label("✅ " + message);
+    	            notification.setStyle("""
+    	                -fx-background-color: rgba(74, 222, 128, 0.9);
+    	                -fx-text-fill: white;
+    	                -fx-padding: 12 20;
+    	                -fx-background-radius: 10;
+    	                -fx-font-size: 14;
+    	                -fx-font-weight: bold;
+    	            """);
+    	            
+    	            StackPane notificationPane = new StackPane(notification);
+    	            notificationPane.setStyle("-fx-background-color: transparent;");
+    	            StackPane.setAlignment(notification, Pos.TOP_CENTER);
+    	            StackPane.setMargin(notification, new Insets(20, 0, 0, 0));
+    	            
+    	            // Add to stage
+    	            if (stage.getScene().getRoot() instanceof StackPane) {
+    	                StackPane root = (StackPane) stage.getScene().getRoot();
+    	                root.getChildren().add(notificationPane);
+    	                
+    	                // Fade out after 3 seconds
+    	                FadeTransition fade = new FadeTransition(Duration.seconds(3), notificationPane);
+    	                fade.setFromValue(1.0);
+    	                fade.setToValue(0.0);
+    	                fade.setOnFinished(e -> root.getChildren().remove(notificationPane));
+    	                fade.play();
+    	            }
+    	        }
+    	        
     	        // ===== AUDIO CALL EVENTS =====
     	        
     	        @Override
@@ -804,59 +1004,75 @@ public class ChatWindow {
         alert.showAndWait();
     }
 
-    private void handleAttachment() {
-    	if (currentConversation == null) {
-            showAlert("Error", "Please select a conversation first");
-            return;
-        }
+   private void handleAttachment() {
+    if (currentConversation == null) {
+        showAlert("Error", "Please select a conversation first");
+        return;
+    }
 
-        // File chooser
-        javafx.stage.FileChooser fileChooser = new javafx.stage.FileChooser();
-        fileChooser.setTitle("Select File to Send");
+    // File chooser
+    FileChooser fileChooser = new FileChooser();
+    fileChooser.setTitle("Select File to Send");
+    
+    // Add filters
+    fileChooser.getExtensionFilters().addAll(
+        new FileChooser.ExtensionFilter("All Files", "*.*"),
+        new FileChooser.ExtensionFilter("Images", "*.png", "*.jpg", "*.jpeg", "*.gif"),
+        new FileChooser.ExtensionFilter("Documents", "*.pdf", "*.doc", "*.docx", "*.txt"),
+        new FileChooser.ExtensionFilter("Archives", "*.zip", "*.rar", "*.7z")
+    );
+
+    File selectedFile = fileChooser.showOpenDialog(stage);
+    if (selectedFile != null) {
+        sendFileToConversation(selectedFile);
+    }
+}
+
+   // ===== UPDATED: Send file with message saving =====
+private void sendFileToConversation(File file) {
+    if (currentConversation == null) return;
+    
+    // Get participants
+    List<Users> participants = chatService.listParticipants(currentConversation.getId());
+    
+    // Find peer
+    Integer targetUserId = participants.stream()
+        .map(Users::getId)
+        .filter(id -> !id.equals(currentUserId))
+        .findFirst()
+        .orElse(null);
+    
+    if (targetUserId == null) {
+        showAlert("Error", "Cannot find recipient");
+        return;
+    }
+
+    try {
+        // Send file via P2P
+        String fileId = p2pManager.sendFile(targetUserId, file);
         
-        // Add filters
-        fileChooser.getExtensionFilters().addAll(
-            new javafx.stage.FileChooser.ExtensionFilter("All Files", "*.*"),
-            new javafx.stage.FileChooser.ExtensionFilter("Images", "*.png", "*.jpg", "*.jpeg", "*.gif"),
-            new javafx.stage.FileChooser.ExtensionFilter("Documents", "*.pdf", "*.doc", "*.docx", "*.txt"),
-            new javafx.stage.FileChooser.ExtensionFilter("Archives", "*.zip", "*.rar", "*.7z")
+        // Save file message to database
+        String fileUrl = "file://" + file.getName() + "|" + formatFileSize(file.length());
+        Message fileMsg = chatService.sendMessage(
+            currentConversation.getId(),
+            currentUserId,
+            "[File] " + file.getName(),
+            fileUrl
         );
-
-        File selectedFile = fileChooser.showOpenDialog(stage);
-        if (selectedFile != null) {
-            sendFileToConversation(selectedFile);
+        
+        // Display in UI
+        if (fileMsg != null) {
+            displayMessage(fileMsg, true);
         }
+        
+        // Show progress dialog
+        showFileProgressDialog(fileId, file.getName(), true);
+        
+    } catch (Exception e) {
+        showAlert("Error", "Failed to send file: " + e.getMessage());
     }
+}
 
- // Thêm method gửi file:
-    private void sendFileToConversation(File file) {
-        if (currentConversation == null) return;
-        
-        // Lấy participants trong conversation
-        List<Users> participants = chatService.listParticipants(currentConversation.getId());
-        
-        // Tìm peer (không phải chính mình)
-        Integer targetUserId = participants.stream()
-            .map(Users::getId)
-            .filter(id -> !id.equals(currentUserId))
-            .findFirst()
-            .orElse(null);
-        
-        if (targetUserId == null) {
-            showAlert("Error", "Cannot find recipient");
-            return;
-        }
-
-        try {
-            String fileId = p2pManager.sendFile(targetUserId, file);
-            
-            // Show progress dialog
-            showFileProgressDialog(fileId, file.getName(), true);
-            
-        } catch (Exception e) {
-            showAlert("Error", "Failed to send file: " + e.getMessage());
-        }
-    }
 
     // Thêm dialog hiển thị progress:
     private Map<String, ProgressDialog> fileProgressDialogs = new HashMap<>();
@@ -957,96 +1173,255 @@ public class ChatWindow {
 
     	// ===== INNER CLASSES FOR DIALOGS =====
 
-    	private class ProgressDialog extends Stage {
-    	    private ProgressBar progressBar;
-    	    private Label statusLabel;
-    	    
-    	    public ProgressDialog(String fileName, boolean isUpload) {
-    	        setTitle(isUpload ? "Sending File" : "Receiving File");
-    	        setWidth(400);
-    	        setHeight(150);
-    	        
-    	        VBox root = new VBox(15);
-    	        root.setPadding(new Insets(20));
-    	        root.setAlignment(Pos.CENTER);
-    	        root.setStyle("-fx-background-color: #16213e;");
-    	        
-    	        Label fileLabel = new Label(fileName);
-    	        fileLabel.setTextFill(Color.web("#eaeaea"));
-    	        fileLabel.setFont(Font.font("System", FontWeight.BOLD, 14));
-    	        
-    	        progressBar = new ProgressBar(0);
-    	        progressBar.setPrefWidth(350);
-    	        
-    	        statusLabel = new Label("0%");
-    	        statusLabel.setTextFill(Color.web("#aaa"));
-    	        
-    	        Button cancelBtn = new Button("Cancel");
-    	        cancelBtn.setOnAction(e -> close());
-    	        
-    	        root.getChildren().addAll(fileLabel, progressBar, statusLabel, cancelBtn);
-    	        
-    	        Scene scene = new Scene(root);
-    	        setScene(scene);
-    	    }
-    	    
-    	    public void updateProgress(int progress) {
-    	        Platform.runLater(() -> {
-    	            progressBar.setProgress(progress / 100.0);
-    	            statusLabel.setText(progress + "%");
-    	        });
-    	    }
-    	}
-
-    	private class AudioCallDialog extends Stage {
-    	    private Label statusLabel;
-    	    private String callId;
-    	    
-    	    public AudioCallDialog(String callId, String status, boolean isIncoming) {
-    	        this.callId = callId;
-    	        setTitle(isIncoming ? "Incoming Call" : "Outgoing Call");
-    	        setWidth(300);
-    	        setHeight(200);
-    	        
-    	        VBox root = new VBox(20);
-    	        root.setPadding(new Insets(20));
-    	        root.setAlignment(Pos.CENTER);
-    	        root.setStyle("-fx-background-color: #16213e;");
-    	        
-    	        Label callIcon = new Label("📞");
-    	        callIcon.setFont(Font.font(48));
-    	        
-    	        statusLabel = new Label(status);
-    	        statusLabel.setTextFill(Color.web("#eaeaea"));
-    	        statusLabel.setFont(Font.font("System", FontWeight.BOLD, 16));
-    	        
-    	        Button endBtn = new Button("End Call");
-    	        endBtn.setStyle("-fx-background-color: #d32f2f; -fx-text-fill: white;");
-    	        endBtn.setOnAction(e -> {
-    	            p2pManager.endAudioCall(callId);
-    	            close();
-    	        });
-    	        
-    	        root.getChildren().addAll(callIcon, statusLabel, endBtn);
-    	        
-    	        Scene scene = new Scene(root);
-    	        setScene(scene);
-    	    }
-    	    
-    	    public void updateStatus(String status) {
-    	        Platform.runLater(() -> statusLabel.setText(status));
-    	    }
-    	    
-
-    private void handleVideoCall() {
-        showAlert("Feature", "Video call - Coming soon");
+    	// ===== UPDATED: File progress dialog with better styling =====
+private class ProgressDialog extends Stage {
+    private ProgressBar progressBar;
+    private Label statusLabel;
+    private Label speedLabel;
+    private long startTime;
+    
+    public ProgressDialog(String fileName, boolean isUpload) {
+        setTitle(isUpload ? "Sending File" : "Receiving File");
+        setWidth(450);
+        setHeight(200);
+        setResizable(false);
+        startTime = System.currentTimeMillis();
+        
+        VBox root = new VBox(15);
+        root.setPadding(new Insets(25));
+        root.setAlignment(Pos.CENTER);
+        root.setStyle("-fx-background-color: #1a1d2e;");
+        
+        // Icon
+        FontIcon icon = new FontIcon(isUpload ? "fas-upload" : "fas-download");
+        icon.setIconSize(40);
+        icon.setIconColor(Color.web("#667eea"));
+        
+        // File name
+        Label fileLabel = new Label(fileName);
+        fileLabel.setTextFill(Color.web("#eaeaea"));
+        fileLabel.setFont(Font.font("System", FontWeight.BOLD, 15));
+        fileLabel.setMaxWidth(400);
+        fileLabel.setStyle("-fx-text-overflow: ellipsis;");
+        
+        // Progress bar
+        progressBar = new ProgressBar(0);
+        progressBar.setPrefWidth(400);
+        progressBar.setStyle("""
+            -fx-accent: #667eea;
+        """);
+        
+        // Status labels
+        HBox statusBox = new HBox(10);
+        statusBox.setAlignment(Pos.CENTER);
+        
+        statusLabel = new Label("0%");
+        statusLabel.setTextFill(Color.web("#aaa"));
+        statusLabel.setFont(Font.font(13));
+        
+        speedLabel = new Label("");
+        speedLabel.setTextFill(Color.web("#888"));
+        speedLabel.setFont(Font.font(12));
+        
+        statusBox.getChildren().addAll(statusLabel, new Label("•"), speedLabel);
+        
+        // Cancel button
+        Button cancelBtn = new Button("Cancel");
+        cancelBtn.setStyle("""
+            -fx-background-color: #ef4444;
+            -fx-text-fill: white;
+            -fx-background-radius: 8;
+            -fx-padding: 8 20;
+            -fx-cursor: hand;
+        """);
+        cancelBtn.setOnAction(e -> close());
+        
+        root.getChildren().addAll(icon, fileLabel, progressBar, statusBox, cancelBtn);
+        
+        Scene scene = new Scene(root);
+        setScene(scene);
+        
+        // Center on parent
+        if (stage != null) {
+            initOwner(stage);
+            setX(stage.getX() + (stage.getWidth() - getWidth()) / 2);
+            setY(stage.getY() + (stage.getHeight() - getHeight()) / 2);
+        }
     }
     
-    private void handleAudioRecord() {
-        showAlert("Feature", "Audio recording - Coming soon");
+    public void updateProgress(int progress) {
+        Platform.runLater(() -> {
+            progressBar.setProgress(progress / 100.0);
+            statusLabel.setText(progress + "%");
+            
+            // Calculate speed
+            long elapsed = System.currentTimeMillis() - startTime;
+            if (elapsed > 0) {
+                double speed = (progress / 100.0) / (elapsed / 1000.0);
+                speedLabel.setText(String.format("%.1f%% per second", speed * 100));
+            }
+        });
+    }
+}
+
+    	// ===== UPDATED: Audio call dialog with better UI =====
+private class AudioCallDialog extends Stage {
+    private Label statusLabel;
+    private Label timerLabel;
+    private String callId;
+    private long callStartTime;
+    private javafx.animation.Timeline timer;
+    
+    public AudioCallDialog(String callId, String status, boolean isIncoming) {
+        this.callId = callId;
+        setTitle(isIncoming ? "Incoming Call" : "Outgoing Call");
+        setWidth(350);
+        setHeight(280);
+        setResizable(false);
+        
+        VBox root = new VBox(20);
+        root.setPadding(new Insets(30));
+        root.setAlignment(Pos.CENTER);
+        root.setStyle("""
+            -fx-background-color: linear-gradient(to bottom, #1a1d2e, #0f1419);
+        """);
+        
+        // Call icon with animation
+        StackPane iconStack = new StackPane();
+        
+        Circle outerCircle = new Circle(50);
+        outerCircle.setFill(Color.TRANSPARENT);
+        outerCircle.setStroke(Color.web("#667eea", 0.3));
+        outerCircle.setStrokeWidth(2);
+        
+        Circle innerCircle = new Circle(40);
+        innerCircle.setFill(Color.web("#667eea"));
+        
+        FontIcon callIcon = new FontIcon("fas-phone");
+        callIcon.setIconSize(30);
+        callIcon.setIconColor(Color.WHITE);
+        
+        iconStack.getChildren().addAll(outerCircle, innerCircle, callIcon);
+        
+        // Pulse animation
+        ScaleTransition pulse = new ScaleTransition(Duration.seconds(1), outerCircle);
+        pulse.setFromX(1.0);
+        pulse.setFromY(1.0);
+        pulse.setToX(1.2);
+        pulse.setToY(1.2);
+        pulse.setCycleCount(javafx.animation.Animation.INDEFINITE);
+        pulse.setAutoReverse(true);
+        pulse.play();
+        
+        // User name (from current chat)
+        Label nameLabel = new Label(currentChatUser != null ? 
+            currentChatUser.getDisplayName() : "Unknown");
+        nameLabel.setTextFill(Color.web("#eaeaea"));
+        nameLabel.setFont(Font.font("System", FontWeight.BOLD, 18));
+        
+        // Status
+        statusLabel = new Label(status);
+        statusLabel.setTextFill(Color.web("#aaa"));
+        statusLabel.setFont(Font.font(14));
+        
+        // Timer
+        timerLabel = new Label("00:00");
+        timerLabel.setTextFill(Color.web("#667eea"));
+        timerLabel.setFont(Font.font("System", FontWeight.BOLD, 16));
+        timerLabel.setVisible(false);
+        
+        // Buttons
+        HBox buttonBox = new HBox(15);
+        buttonBox.setAlignment(Pos.CENTER);
+        
+        Button endBtn = createRoundButton("fas-phone", Color.web("#ef4444"));
+        endBtn.setOnAction(e -> {
+            p2pManager.endAudioCall(callId);
+            close();
+        });
+        
+        Button muteBtn = createRoundButton("fas-microphone-slash", Color.web("#6b7280"));
+        muteBtn.setOnAction(e -> {
+            // TODO: Implement mute
+            showAlert("Feature", "Mute - Coming soon");
+        });
+        
+        buttonBox.getChildren().addAll(muteBtn, endBtn);
+        
+        root.getChildren().addAll(
+            iconStack, nameLabel, statusLabel, timerLabel, buttonBox
+        );
+        
+        Scene scene = new Scene(root);
+        setScene(scene);
+        
+        // Center on parent
+        if (stage != null) {
+            initOwner(stage);
+            setX(stage.getX() + (stage.getWidth() - getWidth()) / 2);
+            setY(stage.getY() + (stage.getHeight() - getHeight()) / 2);
+        }
     }
     
+    private Button createRoundButton(String iconName, Color bgColor) {
+        Button btn = new Button();
+        btn.setGraphic(new FontIcon(iconName));
+        btn.setStyle(String.format("""
+            -fx-background-color: %s;
+            -fx-background-radius: 50%%;
+            -fx-min-width: 60;
+            -fx-min-height: 60;
+            -fx-cursor: hand;
+        """, toHexString(bgColor)));
+        
+        btn.setOnMouseEntered(e -> {
+            btn.setStyle(btn.getStyle() + "-fx-opacity: 0.8;");
+        });
+        btn.setOnMouseExited(e -> {
+            btn.setStyle(btn.getStyle().replace("-fx-opacity: 0.8;", ""));
+        });
+        
+        return btn;
+    }
     
-
+    private String toHexString(Color color) {
+        return String.format("#%02X%02X%02X",
+            (int)(color.getRed() * 255),
+            (int)(color.getGreen() * 255),
+            (int)(color.getBlue() * 255));
+    }
+    
+    public void updateStatus(String status) {
+        Platform.runLater(() -> {
+            statusLabel.setText(status);
+            
+            if ("Active".equals(status) || "Connected".equals(status)) {
+                // Start timer
+                callStartTime = System.currentTimeMillis();
+                timerLabel.setVisible(true);
+                
+                timer = new javafx.animation.Timeline(
+                    new javafx.animation.KeyFrame(Duration.seconds(1), e -> updateTimer())
+                );
+                timer.setCycleCount(javafx.animation.Timeline.INDEFINITE);
+                timer.play();
+            }
+        });
+    }
+    
+    private void updateTimer() {
+        long elapsed = (System.currentTimeMillis() - callStartTime) / 1000;
+        long minutes = elapsed / 60;
+        long seconds = elapsed % 60;
+        timerLabel.setText(String.format("%02d:%02d", minutes, seconds));
+    }
+    
+    @Override
+    public void close() {
+        if (timer != null) {
+            timer.stop();
+        }
+        super.close();
+    }
 }
 }

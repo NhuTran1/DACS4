@@ -63,7 +63,6 @@ dao\BaseDao.class
 model\ClientConnection.class
 dao\FriendDao.class
 network\p2p\PeerDiscoveryService.class
-view\components\GradientButton.class
 network\p2p\PeerDiscoveryService$SignalingMessage.class
 test\TestClient.class
 network\p2p\P2PManager.class
