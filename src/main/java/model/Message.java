@@ -43,6 +43,10 @@ public class Message {
     @Column(name = "image_url", length = 255)
     private String imageUrl;
 
+    // ✅ NEW: Client-generated unique ID for idempotency
+    @Column(name = "client_message_id", length = 100, unique = true)
+    private String clientMessageId;
+
     @OneToMany(mappedBy = "message", cascade = CascadeType.ALL)
     private List<MessageSeen> seenBy;
 
@@ -68,4 +72,3 @@ public class Message {
         updatedAt = LocalDateTime.now();
     }
 }
-

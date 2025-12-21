@@ -2,6 +2,7 @@ package service;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.UUID;
 
 import dao.ConversationDao;
 import dao.MessageDao;
@@ -16,18 +17,31 @@ public class MessageService {
     private ConversationDao conversationDao = new ConversationDao();
     private UserDao userDao = new UserDao();
 
-    // 1. Gửi tin nhắn TEXT (existing)
-    public Message sendMessage(Integer conversationId, Integer senderId, String content, String imageUrl) {
-        return sendMessageWithType(conversationId, senderId, content, imageUrl, Message.MessageType.TEXT);
-    }
-
-    // 2. Gửi tin nhắn với type cụ thể (NEW)
-    public Message sendMessageWithType(Integer conversationId, Integer senderId, 
-                                      String content, String imageUrl, Message.MessageType type) {
+    // ===== IDEMPOTENT MESSAGE SENDING =====
+    
+    /**
+     * Gửi tin nhắn với clientMessageId (Idempotent)
+     * Nếu message với clientMessageId đã tồn tại, trả về message đó
+     */
+    public Message sendMessageIdempotent(Integer conversationId, Integer senderId, 
+                                         String content, String imageUrl, 
+                                         Message.MessageType type, String clientMessageId) {
+        // Validate clientMessageId
+        if (clientMessageId == null || clientMessageId.isEmpty()) {
+            throw new IllegalArgumentException("clientMessageId is required for idempotent send");
+        }
+        
+        // Kiểm tra message đã tồn tại chưa
+        Message existing = messageDao.findByClientMessageId(clientMessageId);
+        if (existing != null) {
+            System.out.println("⚠️ Message already exists (idempotent): " + clientMessageId);
+            return existing;
+        }
+        
         // Kiểm tra conversation tồn tại
         Conversation conv = conversationDao.getConversation(conversationId);
         if (conv == null) {
-            System.out.println("Conversation not found!");
+            System.out.println("❌ Conversation not found!");
             return null;
         }
 
@@ -37,14 +51,14 @@ public class MessageService {
                                                .anyMatch(u -> u.getId().equals(senderId));
 
         if (!isParticipant) {
-            System.out.println("Sender not in conversation!");
+            System.out.println("❌ Sender not in conversation!");
             return null;
         }
 
-        // Check sender có tồn tại không 
+        // Kiểm tra sender có tồn tại không 
         Users sender = userDao.findById(senderId);
         if (sender == null) {
-            System.out.println("Sender not found!");
+            System.out.println("❌ Sender not found!");
             return null;
         }
 
@@ -52,71 +66,144 @@ public class MessageService {
         Message msg = new Message();
         msg.setConversation(conv);
         msg.setSender(sender);
-        msg.setMessageType(type);
+        msg.setMessageType(type != null ? type : Message.MessageType.TEXT);
         msg.setContent(content);
         msg.setImageUrl(imageUrl);
+        msg.setClientMessageId(clientMessageId);
         msg.setCreatedAt(LocalDateTime.now());
 
-        // Lưu DB
-        messageDao.saveMessage(msg);
+        // Lưu DB với idempotent
+        Message savedMsg = messageDao.saveMessageIdempotent(msg);
+        
+        if (savedMsg != null && savedMsg.getId() != null) {
+            // Chỉ tăng unread count nếu là message mới (không phải duplicate)
+            if (savedMsg.getId().equals(msg.getId())) {
+                messageDao.increaseUnreadCount(conversationId, senderId);
+            }
+            
+            // Cập nhật updated_at của conversation
+            conv.setUpdatedAt(LocalDateTime.now());
+        }
 
-        // Tăng unread_count cho user khác
-        messageDao.increaseUnreadCount(conversationId, senderId);
-
-        // Cập nhật updated_at của conversation
-        conv.setUpdatedAt(LocalDateTime.now());
-
-        return msg;
+        return savedMsg;
     }
 
-    // 3. Gửi file message (NEW)
-    public Message sendFileMessage(Integer conversationId, Integer senderId, String fileName) {
-        return sendMessageWithType(
+    // ===== LEGACY METHODS (backwards compatibility) =====
+    
+    /**
+     * Gửi tin nhắn TEXT (legacy - tự động generate clientMessageId)
+     */
+    public Message sendMessage(Integer conversationId, Integer senderId, String content, String imageUrl) {
+        String clientMessageId = UUID.randomUUID().toString();
+        return sendMessageIdempotent(conversationId, senderId, content, imageUrl, 
+                                     Message.MessageType.TEXT, clientMessageId);
+    }
+
+    /**
+     * Gửi tin nhắn với type cụ thể (legacy - tự động generate clientMessageId)
+     */
+    public Message sendMessageWithType(Integer conversationId, Integer senderId, 
+                                      String content, String imageUrl, Message.MessageType type) {
+        String clientMessageId = UUID.randomUUID().toString();
+        return sendMessageIdempotent(conversationId, senderId, content, imageUrl, 
+                                     type, clientMessageId);
+    }
+
+    // ===== FILE MESSAGE METHODS =====
+    
+    /**
+     * Gửi file message với clientMessageId (Idempotent)
+     */
+    public Message sendFileMessageIdempotent(Integer conversationId, Integer senderId, 
+                                            String fileName, String fileUrl, String clientMessageId) {
+        return sendMessageIdempotent(
             conversationId, 
             senderId, 
             "[File] " + fileName, 
-            null, 
-            Message.MessageType.FILE
+            fileUrl, 
+            Message.MessageType.FILE,
+            clientMessageId
         );
     }
+    
+    /**
+     * Gửi file message (legacy - tự động generate clientMessageId)
+     */
+    public Message sendFileMessage(Integer conversationId, Integer senderId, String fileName) {
+        String clientMessageId = UUID.randomUUID().toString();
+        return sendFileMessageIdempotent(conversationId, senderId, fileName, null, clientMessageId);
+    }
 
-    // 4. Gửi image message (NEW)
-    public Message sendImageMessage(Integer conversationId, Integer senderId, 
-                                   String caption, String imageUrl) {
-        return sendMessageWithType(
+    /**
+     * Gửi image message với clientMessageId (Idempotent)
+     */
+    public Message sendImageMessageIdempotent(Integer conversationId, Integer senderId, 
+                                             String caption, String imageUrl, String clientMessageId) {
+        return sendMessageIdempotent(
             conversationId, 
             senderId, 
             caption != null ? caption : "[Image]", 
             imageUrl, 
-            Message.MessageType.IMAGE
+            Message.MessageType.IMAGE,
+            clientMessageId
         );
     }
 
-    // 5. Gửi audio message (NEW)
-    public Message sendAudioMessage(Integer conversationId, Integer senderId, 
-                                   String duration, String audioUrl) {
-        return sendMessageWithType(
+    /**
+     * Gửi image message (legacy)
+     */
+    public Message sendImageMessage(Integer conversationId, Integer senderId, 
+                                   String caption, String imageUrl) {
+        String clientMessageId = UUID.randomUUID().toString();
+        return sendImageMessageIdempotent(conversationId, senderId, caption, imageUrl, clientMessageId);
+    }
+
+    /**
+     * Gửi audio message với clientMessageId (Idempotent)
+     */
+    public Message sendAudioMessageIdempotent(Integer conversationId, Integer senderId, 
+                                             String duration, String audioUrl, String clientMessageId) {
+        return sendMessageIdempotent(
             conversationId, 
             senderId, 
             "[Audio] " + duration, 
             audioUrl, 
-            Message.MessageType.AUDIO
+            Message.MessageType.AUDIO,
+            clientMessageId
         );
     }
 
-    // 6. Lấy lịch sử tin nhắn
+    /**
+     * Gửi audio message (legacy)
+     */
+    public Message sendAudioMessage(Integer conversationId, Integer senderId, 
+                                   String duration, String audioUrl) {
+        String clientMessageId = UUID.randomUUID().toString();
+        return sendAudioMessageIdempotent(conversationId, senderId, duration, audioUrl, clientMessageId);
+    }
+
+    // ===== QUERY METHODS =====
+    
+    /**
+     * Lấy lịch sử tin nhắn
+     */
     public List<Message> listMessages(Integer conversationId) {
         return messageDao.listMessageInConversation(conversationId);
     }
 
-    // 7. Lấy chỉ file messages trong conversation (NEW)
+    /**
+     * Lấy chỉ file messages trong conversation
+     */
     public List<Message> listFileMessages(Integer conversationId) {
         return messageDao.listFileMessagesInConversation(conversationId);
     }
 
-    // 8. Đánh dấu đã đọc 1 message
+    /**
+     * Đánh dấu đã đọc 1 message
+     */
     public void markMessageSeen(Integer messageId, Integer userId) {
         messageDao.markMessageSeen(messageId, userId);
+        
         // Đồng thời reset unread_count
         Message msg = getMessageById(messageId);
         if (msg != null) {
@@ -124,23 +211,38 @@ public class MessageService {
         }
     }
 
-    // 9. Reset unread count khi user mở cuộc chat
+    /**
+     * Reset unread count khi user mở cuộc chat
+     */
     public void resetUnread(Integer conversationId, Integer userId) {
         messageDao.resetUnread(conversationId, userId);
     }
     
-    // 10. Helper: lấy message theo id
+    /**
+     * Helper: lấy message theo id
+     */
     public Message getMessageById(Integer msgId) {
         return messageDao.getMessageById(msgId);
     }
+    
+    /**
+     * Tìm message theo clientMessageId
+     */
+    public Message getMessageByClientId(String clientMessageId) {
+        return messageDao.findByClientMessageId(clientMessageId);
+    }
 
-    // 11. Xóa message (soft delete - NEW)
+    /**
+     * Xóa message (soft delete)
+     */
     public boolean deleteMessage(Integer messageId, Integer userId) {
         // TODO: Implement soft delete or hard delete with permission check
         return false;
     }
 
-    // 12. Get message statistics (NEW)
+    /**
+     * Get message statistics
+     */
     public MessageStats getMessageStats(Integer conversationId) {
         List<Message> messages = listMessages(conversationId);
         

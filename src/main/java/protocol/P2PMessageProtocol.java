@@ -8,7 +8,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
-	Xay dung json message để gửi đi
+ * P2P Message Protocol with Idempotent support (clientMessageId)
  */
 public class P2PMessageProtocol {
     private static final Gson gson = new Gson();
@@ -60,15 +60,26 @@ public class P2PMessageProtocol {
         }
     }
 
-    // ===== CHAT MESSAGES =====
+    // ===== CHAT MESSAGES - WITH IDEMPOTENT =====
     
-    public static String buildChatMessage(Integer from, Integer conversationId, String content) {
+    /**
+     * Build chat message với clientMessageId (Idempotent)
+     */
+    public static String buildChatMessage(Integer from, Integer conversationId, String content, String clientMessageId) {
         Message msg = new Message();
         msg.type = MessageType.CHAT_MESSAGE.name();
         msg.from = from;
         msg.conversationId = conversationId;
         msg.data.put("content", content);
+        msg.data.put("clientMessageId", clientMessageId);
         return gson.toJson(msg);
+    }
+    
+    /**
+     * Legacy wrapper (không có clientMessageId)
+     */
+    public static String buildChatMessage(Integer from, Integer conversationId, String content) {
+        return buildChatMessage(from, conversationId, content, java.util.UUID.randomUUID().toString());
     }
 
     public static String buildTypingStart(Integer from, Integer conversationId) {

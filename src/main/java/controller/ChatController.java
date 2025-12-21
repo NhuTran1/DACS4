@@ -10,14 +10,15 @@ import network.p2p.PeerDiscoveryService;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 import java.util.function.Consumer;
 
 /**
- * ChatController - Quản lý logic chat
+ * ChatController - Quản lý logic chat với Idempotent support
  * 
  * Trách nhiệm:
  * - Quản lý conversations
- * - Gửi/nhận chat messages
+ * - Gửi/nhận chat messages với idempotent
  * - Typing indicators
  * - Message seen
  * - Friend list management
@@ -84,7 +85,7 @@ public class ChatController {
     }
 
     public Users getUser(Integer userId) {
-    	return chatService.getUserById(currentUserId);
+        return chatService.getUserById(userId);
     }
 
     public boolean isUserOnline(Integer userId) {
@@ -137,14 +138,21 @@ public class ChatController {
         }
     }
 
-    // ===== MESSAGE MANAGEMENT =====
+    // ===== MESSAGE MANAGEMENT - IDEMPOTENT =====
     
     /**
-     * Gửi tin nhắn text
+     * Gửi tin nhắn text với clientMessageId (Idempotent)
+     * Client tự generate clientMessageId và gửi kèm
      */
-    public void sendMessage(Integer conversationId, String content, MessageCallback callback) {
+    public void sendMessageWithClientId(Integer conversationId, String content, 
+                                       String clientMessageId, MessageCallback callback) {
         if (content == null || content.trim().isEmpty()) {
             if (callback != null) callback.onError("Cannot send empty message");
+            return;
+        }
+        
+        if (clientMessageId == null || clientMessageId.trim().isEmpty()) {
+            if (callback != null) callback.onError("clientMessageId is required");
             return;
         }
 
@@ -166,12 +174,14 @@ public class ChatController {
                 return;
             }
 
-            // 3. Save to DB
-            Message savedMessage = chatService.sendMessage(
+            // 3. Save to DB with idempotent (kiểm tra duplicate)
+            Message savedMessage = chatService.sendMessageIdempotent(
                 conversationId, 
                 currentUserId, 
                 content.trim(), 
-                null
+                null,
+                Message.MessageType.TEXT,
+                clientMessageId
             );
 
             if (savedMessage == null) {
@@ -179,8 +189,8 @@ public class ChatController {
                 return;
             }
 
-            // 4. Send via P2P
-            boolean p2pSuccess = p2pManager.sendChatMessage(conversationId, content.trim());
+            // 4. Send via P2P (P2P cũng sẽ include clientMessageId)
+            boolean p2pSuccess = p2pManager.sendChatMessage(conversationId, content.trim(), clientMessageId);
 
             if (!p2pSuccess) {
                 System.err.println("⚠️ Failed to send message to some peers");
@@ -195,6 +205,15 @@ public class ChatController {
         } catch (Exception e) {
             if (callback != null) callback.onError("Error: " + e.getMessage());
         }
+    }
+    
+    /**
+     * Gửi tin nhắn text (tự động generate clientMessageId)
+     * Wrapper method cho backwards compatibility
+     */
+    public void sendMessage(Integer conversationId, String content, MessageCallback callback) {
+        String clientMessageId = UUID.randomUUID().toString();
+        sendMessageWithClientId(conversationId, content, clientMessageId, callback);
     }
 
     /**
@@ -216,16 +235,18 @@ public class ChatController {
 
     /**
      * Lưu file message vào DB (được gọi khi file transfer hoàn tất)
+     * Idempotent với clientMessageId
      */
-    public void saveFileMessage(Integer conversationId, Integer senderId, 
-                                String fileName, String fileUrl, 
-                                Consumer<Message> callback) {
+    public void saveFileMessageWithClientId(Integer conversationId, Integer senderId, 
+                                           String fileName, String fileUrl, String clientMessageId,
+                                           Consumer<Message> callback) {
         try {
-            Message fileMsg = chatService.sendMessage(
+            Message fileMsg = chatService.sendFileMessageIdempotent(
                 conversationId,
                 senderId,
-                "[File] " + fileName,
-                fileUrl
+                fileName,
+                fileUrl,
+                clientMessageId
             );
             
             if (callback != null) {
@@ -237,6 +258,17 @@ public class ChatController {
                 callback.accept(null);
             }
         }
+    }
+    
+    /**
+     * Legacy wrapper
+     */
+    public void saveFileMessage(Integer conversationId, Integer senderId, 
+                                String fileName, String fileUrl, 
+                                Consumer<Message> callback) {
+        String clientMessageId = UUID.randomUUID().toString();
+        saveFileMessageWithClientId(conversationId, senderId, fileName, fileUrl, 
+                                   clientMessageId, callback);
     }
 
     /**

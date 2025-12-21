@@ -6,9 +6,12 @@ import model.Message;
 
 import java.io.File;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
-/**	Router */
+/**
+ * P2PManager - Router with Idempotent support
+ */
 public class P2PManager implements PeerConnection.P2PMessageHandler {
     private final Integer localUserId;
     private final Map<Integer, PeerConnection> activeConnections = new ConcurrentHashMap<>();
@@ -113,13 +116,16 @@ public class P2PManager implements PeerConnection.P2PMessageHandler {
         return localUserId;
     }
 
-    // ===== CHAT MESSAGES =====
+    // ===== CHAT MESSAGES - IDEMPOTENT =====
 
-    public boolean sendChatMessage(Integer conversationId, String content) {
+    /**
+     * Gửi chat message với clientMessageId (Idempotent)
+     */
+    public boolean sendChatMessage(Integer conversationId, String content, String clientMessageId) {
         var participants = chatService.listParticipants(conversationId);
         if (participants == null || participants.isEmpty()) return false;
 
-        String json = P2PMessageProtocol.buildChatMessage(localUserId, conversationId, content);
+        String json = P2PMessageProtocol.buildChatMessage(localUserId, conversationId, content, clientMessageId);
         boolean success = true;
 
         for (var user : participants) {
@@ -137,6 +143,14 @@ public class P2PManager implements PeerConnection.P2PMessageHandler {
         }
 
         return success;
+    }
+    
+    /**
+     * Legacy wrapper (tự động generate clientMessageId)
+     */
+    public boolean sendChatMessage(Integer conversationId, String content) {
+        String clientMessageId = UUID.randomUUID().toString();
+        return sendChatMessage(conversationId, content, clientMessageId);
     }
 
     public void sendTypingStart(Integer conversationId) {
@@ -286,20 +300,25 @@ public class P2PManager implements PeerConnection.P2PMessageHandler {
         }
     }
 
-    // ===== HANDLE INCOMING MESSAGES =====
+    // ===== HANDLE INCOMING MESSAGES - WITH IDEMPOTENT =====
 
     private void handleChatMessage(P2PMessageProtocol.Message msg) {
         if (eventListener == null) return;
 
         String content = (String) msg.data.get("content");
-        Message savedMsg = chatService.sendMessage(
+        String clientMessageId = (String) msg.data.get("clientMessageId");
+        
+        // Sử dụng sendMessageIdempotent để tránh duplicate
+        Message savedMsg = chatService.sendMessageIdempotent(
             msg.conversationId, 
             msg.from, 
             content, 
-            null
+            null,
+            Message.MessageType.TEXT,
+            clientMessageId != null ? clientMessageId : UUID.randomUUID().toString()
         );
 
-        //goij callback Ui để cập nhật giao diện 
+        // Gọi callback UI để cập nhật giao diện 
         if (savedMsg != null) {
             eventListener.onChatMessageReceived(msg.conversationId, savedMsg);
         }

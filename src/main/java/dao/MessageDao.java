@@ -14,6 +14,68 @@ import model.Users;
 
 public class MessageDao {
 
+	/**
+     * Tìm message theo clientMessageId (để kiểm tra idempotent)
+     */
+    public Message findByClientMessageId(String clientMessageId) {
+        if (clientMessageId == null || clientMessageId.isEmpty()) {
+            return null;
+        }
+        
+        try (Session session = HibernateUtil.getSessionFactory().openSession()) {
+            String sql = """
+                SELECT *
+                FROM message
+                WHERE client_message_id = :clientMsgId
+                LIMIT 1
+                """;
+            
+            Query<Message> query = session.createNativeQuery(sql, Message.class);
+            query.setParameter("clientMsgId", clientMessageId);
+            
+            List<Message> results = query.getResultList();
+            return results.isEmpty() ? null : results.get(0);
+        } catch (Exception e) {
+            e.printStackTrace();
+            return null;
+        }
+    }
+    
+    /**
+     * Lưu tin nhắn mới với clientMessageId (idempotent)
+     * Trả về message đã lưu hoặc message đã tồn tại
+     */
+    public Message saveMessageIdempotent(Message message) {
+        if (message.getClientMessageId() == null || message.getClientMessageId().isEmpty()) {
+            throw new IllegalArgumentException("clientMessageId is required for idempotent save");
+        }
+        
+        Transaction tx = null;
+        try (Session session = HibernateUtil.getSessionFactory().openSession()) {
+            tx = session.beginTransaction();
+            
+            // Kiểm tra xem message đã tồn tại chưa
+            Message existing = findByClientMessageId(message.getClientMessageId());
+            if (existing != null) {
+                System.out.println("⚠️ Message already exists (idempotent): " + message.getClientMessageId());
+                tx.rollback();
+                return existing; // Trả về message đã tồn tại
+            }
+            
+            // Lưu message mới
+            session.save(message);
+            tx.commit();
+            
+            System.out.println("✅ New message saved: " + message.getClientMessageId());
+            return message;
+            
+        } catch (Exception e) {
+            if (tx != null) tx.rollback();
+            e.printStackTrace();
+            return null;
+        }
+    }
+    
 	//luu tin nhan moi
 	public void saveMessage(Message message) {
 		Transaction tx = null;
