@@ -139,5 +139,114 @@ public class MessageDao {
 	        e.printStackTrace();
 	    }
 	}
+	
+	// ===== THÊM VÀO MessageDao.java =====
+
+	/**
+	 * Lấy chỉ file messages trong conversation
+	 */
+	public List<Message> listFileMessagesInConversation(Integer conversationId) {
+	    try(Session session = HibernateUtil.getSessionFactory().openSession()) {
+	        String sql = """
+	                SELECT *
+	                FROM message
+	                WHERE conversation_id = :cid
+	                  AND message_type IN ('FILE', 'IMAGE', 'AUDIO')
+	                ORDER BY created_at ASC
+	                """;
+	        
+	        Query<Message> query = session.createNativeQuery(sql, Message.class);
+	        query.setParameter("cid", conversationId);
+	        
+	        return query.getResultList();
+	    } catch (Exception e) {
+	        e.printStackTrace();
+	        return List.of();
+	    }
+	}
+
+	/**
+	 * Count messages by type in conversation
+	 */
+	public Long countMessagesByType(Integer conversationId, String messageType) {
+	    try(Session session = HibernateUtil.getSessionFactory().openSession()) {
+	        String sql = """
+	                SELECT COUNT(*)
+	                FROM message
+	                WHERE conversation_id = :cid
+	                  AND message_type = :type
+	                """;
+	        
+	        Query<Number> query = session.createNativeQuery(sql);
+	        query.setParameter("cid", conversationId);
+	        query.setParameter("type", messageType);
+	        
+	        Number result = query.uniqueResult();
+	        return result != null ? result.longValue() : 0L;
+	    } catch (Exception e) {
+	        e.printStackTrace();
+	        return 0L;
+	    }
+	}
+
+	/**
+	 * Get latest file messages across all conversations for a user
+	 */
+	public List<Message> getRecentFileMessages(Integer userId, int limit) {
+	    try(Session session = HibernateUtil.getSessionFactory().openSession()) {
+	        String sql = """
+	                SELECT m.*
+	                FROM message m
+	                JOIN conversation c ON m.conversation_id = c.id
+	                JOIN participant p ON c.id = p.conversation_id
+	                WHERE p.user_id = :uid
+	                  AND m.message_type IN ('FILE', 'IMAGE', 'AUDIO')
+	                ORDER BY m.created_at DESC
+	                LIMIT :limit
+	                """;
+	        
+	        Query<Message> query = session.createNativeQuery(sql, Message.class);
+	        query.setParameter("uid", userId);
+	        query.setParameter("limit", limit);
+	        
+	        return query.getResultList();
+	    } catch (Exception e) {
+	        e.printStackTrace();
+	        return List.of();
+	    }
+	}
+
+	/**
+	 * Search messages by content and type
+	 */
+	public List<Message> searchMessages(Integer conversationId, String keyword, String messageType) {
+	    try(Session session = HibernateUtil.getSessionFactory().openSession()) {
+	        StringBuilder sql = new StringBuilder("""
+	                SELECT *
+	                FROM message
+	                WHERE conversation_id = :cid
+	                  AND content LIKE :keyword
+	                """);
+	        
+	        if (messageType != null && !messageType.isEmpty()) {
+	            sql.append(" AND message_type = :type");
+	        }
+	        
+	        sql.append(" ORDER BY created_at DESC");
+	        
+	        Query<Message> query = session.createNativeQuery(sql.toString(), Message.class);
+	        query.setParameter("cid", conversationId);
+	        query.setParameter("keyword", "%" + keyword + "%");
+	        
+	        if (messageType != null && !messageType.isEmpty()) {
+	            query.setParameter("type", messageType);
+	        }
+	        
+	        return query.getResultList();
+	    } catch (Exception e) {
+	        e.printStackTrace();
+	        return List.of();
+	    }
+	}
 
 }

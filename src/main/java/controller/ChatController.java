@@ -5,7 +5,6 @@ import model.Message;
 import model.Users;
 import service.ChatService;
 import network.p2p.P2PManager;
-import dao.UserDao;
 import network.p2p.PeerInfo;
 import network.p2p.PeerDiscoveryService;
 
@@ -33,7 +32,6 @@ public class ChatController {
     private final ChatService chatService;
     private final P2PManager p2pManager;
     private final Integer currentUserId;
-    private final UserDao userDao;
     private final FileTransferController fileTransferController;
     //private final AudioController audioController;
     
@@ -63,7 +61,6 @@ public class ChatController {
         this.chatService = chatService;
         this.p2pManager = p2pManager;
         this.currentUserId = currentUserId;
-        this.userDao = new UserDao();
         
         // Initialize sub-controllers
         this.fileTransferController = new FileTransferController(p2pManager, chatService, currentUserId);
@@ -72,7 +69,6 @@ public class ChatController {
         setupP2PListeners();
     }
 
-    // ===== GETTERS FOR SUB-CONTROLLERS =====
     
     public FileTransferController getFileTransferController() {
         return fileTransferController;
@@ -82,14 +78,13 @@ public class ChatController {
 //        return audioController;
 //    }
 
-    // ===== USER MANAGEMENT =====
     
     public Users getCurrentUser() {
-        return userDao.findById(currentUserId);
+        return chatService.getUserById(currentUserId);
     }
 
     public Users getUser(Integer userId) {
-        return userDao.findById(userId);
+    	return chatService.getUserById(currentUserId);
     }
 
     public boolean isUserOnline(Integer userId) {
@@ -352,7 +347,7 @@ public class ChatController {
                     String trimmed = username.trim();
                     if (trimmed.isEmpty()) continue;
 
-                    Users user = userDao.findByUsername(trimmed);
+                    Users user = chatService.getUserByUsername(trimmed);
                     if (user == null) {
                         callback.accept(new OperationResult(false, "User not found: " + trimmed));
                         return;
@@ -429,7 +424,7 @@ public class ChatController {
             @Override
             public void onTypingReceived(Integer conversationId, Integer userId) {
                 if (typingCallback != null) {
-                    Users user = userDao.findById(userId);
+                    Users user = chatService.getUserById(userId);
                     String userName = user != null ? user.getDisplayName() : "User" + userId;
                     typingCallback.onTyping(conversationId, userId, userName);
                 }

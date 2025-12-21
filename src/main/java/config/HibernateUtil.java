@@ -41,7 +41,8 @@ public class HibernateUtil {
             config.addAnnotatedClass(model.MessageSeen.class);
             config.addAnnotatedClass(model.UnreadCount.class);
             config.addAnnotatedClass(model.UserSession.class);
-
+            config.addAnnotatedClass(model.FileAttachment.class);
+            
             // Build SessionFactory
             sessionFactory = config.buildSessionFactory();
             System.out.println("Hibernate SessionFactory created successfully (AppConfig version).");
