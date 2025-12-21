@@ -112,41 +112,41 @@ public class ChatClientMain {
 				
 			}
 
-			@Override
-			public void onAudioCallRequested(Integer fromUser, String callId) {
-				// TODO Auto-generated method stub
-				
-			}
-
-			@Override
-			public void onAudioCallAccepted(Integer fromUser, String callId) {
-				// TODO Auto-generated method stub
-				
-			}
-
-			@Override
-			public void onAudioCallRejected(Integer fromUser, String callId, String reason) {
-				// TODO Auto-generated method stub
-				
-			}
-
-			@Override
-			public void onAudioCallStarted(String callId) {
-				// TODO Auto-generated method stub
-				
-			}
-
-			@Override
-			public void onAudioCallEnded(String callId) {
-				// TODO Auto-generated method stub
-				
-			}
-
-			@Override
-			public void onAudioCallError(String callId, String error) {
-				// TODO Auto-generated method stub
-				
-			}
+//			@Override
+//			public void onAudioCallRequested(Integer fromUser, String callId) {
+//				// TODO Auto-generated method stub
+//				
+//			}
+//
+//			@Override
+//			public void onAudioCallAccepted(Integer fromUser, String callId) {
+//				// TODO Auto-generated method stub
+//				
+//			}
+//
+//			@Override
+//			public void onAudioCallRejected(Integer fromUser, String callId, String reason) {
+//				// TODO Auto-generated method stub
+//				
+//			}
+//
+//			@Override
+//			public void onAudioCallStarted(String callId) {
+//				// TODO Auto-generated method stub
+//				
+//			}
+//
+//			@Override
+//			public void onAudioCallEnded(String callId) {
+//				// TODO Auto-generated method stub
+//				
+//			}
+//
+//			@Override
+//			public void onAudioCallError(String callId, String error) {
+//				// TODO Auto-generated method stub
+//				
+//			}
         });
 
         // 5. Kết nối tới Signaling Server

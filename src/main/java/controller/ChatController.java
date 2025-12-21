@@ -6,72 +6,172 @@ import model.Users;
 import service.ChatService;
 import network.p2p.P2PManager;
 import dao.UserDao;
+import network.p2p.PeerInfo;
+import network.p2p.PeerDiscoveryService;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
 
+/**
+ * ChatController - Quản lý logic chat
+ * 
+ * Trách nhiệm:
+ * - Quản lý conversations
+ * - Gửi/nhận chat messages
+ * - Typing indicators
+ * - Message seen
+ * - Friend list management
+ * 
+ * Phụ thuộc:
+ * - ChatService (DB operations)
+ * - P2PManager (P2P messaging)
+ * 
+ * KHÔNG phụ thuộc UI
+ */
 public class ChatController {
     private final ChatService chatService;
     private final P2PManager p2pManager;
     private final Integer currentUserId;
     private final UserDao userDao;
+    private final FileTransferController fileTransferController;
+    //private final AudioController audioController;
+    
+    // Callbacks for UI
+    private MessageReceivedCallback messageReceivedCallback;
+    private TypingCallback typingCallback;
+    private ConnectionLostCallback connectionLostCallback;
+
+    public interface MessageReceivedCallback {
+        void onMessageReceived(Integer conversationId, Message message);
+    }
+
+    public interface TypingCallback {
+        void onTyping(Integer conversationId, Integer userId, String userName);
+    }
+
+    public interface ConnectionLostCallback {
+        void onConnectionLost(Integer userId);
+    }
+
+    public interface MessageCallback {
+        void onSuccess(Message message);
+        void onError(String error);
+    }
 
     public ChatController(ChatService chatService, P2PManager p2pManager, Integer currentUserId) {
         this.chatService = chatService;
         this.p2pManager = p2pManager;
         this.currentUserId = currentUserId;
         this.userDao = new UserDao();
+        
+        // Initialize sub-controllers
+        this.fileTransferController = new FileTransferController(p2pManager, chatService, currentUserId);
+        //this.audioController = new AudioController(p2pManager, currentUserId);
+        
+        setupP2PListeners();
     }
 
-    // ===== RESULT CLASSES =====
-    public static class OperationResult {
-        public boolean success;
-        public String message;
-        public Object data;
-
-        public OperationResult(boolean success, String message) {
-            this.success = success;
-            this.message = message;
-        }
-
-        public OperationResult(boolean success, String message, Object data) {
-            this.success = success;
-            this.message = message;
-            this.data = data;
-        }
+    // ===== GETTERS FOR SUB-CONTROLLERS =====
+    
+    public FileTransferController getFileTransferController() {
+        return fileTransferController;
     }
 
-    // ===== SEND MESSAGE (DIRECT & GROUP) =====
+//    public AudioController getAudioController() {
+//        return audioController;
+//    }
+
+    // ===== USER MANAGEMENT =====
+    
+    public Users getCurrentUser() {
+        return userDao.findById(currentUserId);
+    }
+
+    public Users getUser(Integer userId) {
+        return userDao.findById(userId);
+    }
+
+    public boolean isUserOnline(Integer userId) {
+        PeerInfo peer = PeerDiscoveryService.getInstance().getPeer(userId);
+        return peer != null;
+    }
+
+    // ===== CONVERSATION MANAGEMENT =====
+    
     /**
-     * Gửi tin nhắn trong conversation (direct hoặc group)
-     * 1. Lưu vào DB
-     * 2. Gửi P2P tới tất cả participants
+     * Mở conversation với friend (tạo mới nếu chưa có)
      */
-    public void sendMessage(Integer conversationId, String content) {
+    public Conversation openConversation(Integer friendUserId) {
+        Conversation existing = chatService.getDirectConversation(currentUserId, friendUserId);
+        if (existing != null) {
+            return existing;
+        }
+        
+        return chatService.createDirectConversation(currentUserId, friendUserId);
+    }
+
+    /**
+     * Lấy danh sách conversations
+     */
+    public List<Conversation> getConversations() {
+        try {
+            return chatService.listConversationsByUser(currentUserId);
+        } catch (Exception e) {
+            System.err.println("❌ Error loading conversations: " + e.getMessage());
+            return new ArrayList<>();
+        }
+    }
+
+    /**
+     * Lấy thông tin conversation
+     */
+    public Conversation getConversationInfo(Integer conversationId) {
+        return chatService.getConversationById(conversationId);
+    }
+
+    /**
+     * Lấy danh sách participants
+     */
+    public List<Users> getParticipants(Integer conversationId) {
+        try {
+            return chatService.listParticipants(conversationId);
+        } catch (Exception e) {
+            System.err.println("❌ Error getting participants: " + e.getMessage());
+            return new ArrayList<>();
+        }
+    }
+
+    // ===== MESSAGE MANAGEMENT =====
+    
+    /**
+     * Gửi tin nhắn text
+     */
+    public void sendMessage(Integer conversationId, String content, MessageCallback callback) {
         if (content == null || content.trim().isEmpty()) {
-            System.err.println("❌ Cannot send empty message");
+            if (callback != null) callback.onError("Cannot send empty message");
             return;
         }
 
         try {
-            // 1. Validate conversation exists và user có quyền gửi
+            // 1. Validate conversation
             Conversation conversation = chatService.getConversationById(conversationId);
             if (conversation == null) {
-                System.err.println("❌ Conversation not found: " + conversationId);
+                if (callback != null) callback.onError("Conversation not found");
                 return;
             }
 
+            // 2. Check if user is participant
             List<Users> participants = chatService.listParticipants(conversationId);
             boolean isParticipant = participants.stream()
                 .anyMatch(u -> u.getId().equals(currentUserId));
 
             if (!isParticipant) {
-                System.err.println("❌ User not in conversation: " + currentUserId);
+                if (callback != null) callback.onError("You are not in this conversation");
                 return;
             }
 
-            // 2. Lưu message vào DB
+            // 3. Save to DB
             Message savedMessage = chatService.sendMessage(
                 conversationId, 
                 currentUserId, 
@@ -80,84 +180,161 @@ public class ChatController {
             );
 
             if (savedMessage == null) {
-                System.err.println("❌ Failed to save message to database");
+                if (callback != null) callback.onError("Failed to save message");
                 return;
             }
 
-            System.out.println("✅ Message saved to DB (ID: " + savedMessage.getId() + ")");
-
-            // 3. Gửi P2P tới các peers trong conversation
+            // 4. Send via P2P
             boolean p2pSuccess = p2pManager.sendChatMessage(conversationId, content.trim());
 
-            if (p2pSuccess) {
-                System.out.println("✅ Message sent via P2P to all participants");
-            } else {
-                System.err.println("⚠️ Failed to send message to some P2P peers");
+            if (!p2pSuccess) {
+                System.err.println("⚠️ Failed to send message to some peers");
             }
 
-            // 4. Reset unread count cho chính mình
+            // 5. Reset unread count
             chatService.resetUnread(conversationId, currentUserId);
 
+            // 6. Notify success
+            if (callback != null) callback.onSuccess(savedMessage);
+
         } catch (Exception e) {
-            System.err.println("❌ Error sending message: " + e.getMessage());
-            e.printStackTrace();
+            if (callback != null) callback.onError("Error: " + e.getMessage());
         }
     }
 
-    // ===== CREATE DIRECT CONVERSATION =====
     /**
-     * Tạo cuộc hội thoại 1-1 với một user
-     * Callback cho UI để xử lý kết quả bất đồng bộ
+     * Lấy danh sách messages
      */
-    public void createDirectConversation(Integer friendUserId, Consumer<OperationResult> callback) {
+    public List<Message> getMessages(Integer conversationId) {
+        try {
+            List<Message> messages = chatService.listMessages(conversationId);
+            
+            // Reset unread count
+            chatService.resetUnread(conversationId, currentUserId);
+            
+            return messages;
+        } catch (Exception e) {
+            System.err.println("❌ Error loading messages: " + e.getMessage());
+            return new ArrayList<>();
+        }
+    }
+
+    /**
+     * Lưu file message vào DB (được gọi khi file transfer hoàn tất)
+     */
+    public void saveFileMessage(Integer conversationId, Integer senderId, 
+                                String fileName, String fileUrl, 
+                                Consumer<Message> callback) {
+        try {
+            Message fileMsg = chatService.sendMessage(
+                conversationId,
+                senderId,
+                "[File] " + fileName,
+                fileUrl
+            );
+            
+            if (callback != null) {
+                callback.accept(fileMsg);
+            }
+        } catch (Exception e) {
+            System.err.println("❌ Error saving file message: " + e.getMessage());
+            if (callback != null) {
+                callback.accept(null);
+            }
+        }
+    }
+
+    /**
+     * Đánh dấu message đã đọc
+     */
+    public void markMessageAsSeen(Integer messageId) {
+        try {
+            Message message = chatService.getMessageById(messageId);
+            if (message == null) return;
+
+            chatService.markMessageSeen(messageId, currentUserId);
+
+            // TODO: Send seen notification via P2P
+            System.out.println("✅ Marked message " + messageId + " as seen");
+
+        } catch (Exception e) {
+            System.err.println("❌ Error marking message as seen: " + e.getMessage());
+        }
+    }
+
+    // ===== TYPING INDICATORS =====
+    
+    public void sendTypingStart(Integer conversationId) {
+        try {
+            p2pManager.sendTypingStart(conversationId);
+        } catch (Exception e) {
+            System.err.println("❌ Error sending typing start: " + e.getMessage());
+        }
+    }
+
+    public void sendTypingStop(Integer conversationId) {
+        try {
+            p2pManager.sendTypingStop(conversationId);
+        } catch (Exception e) {
+            System.err.println("❌ Error sending typing stop: " + e.getMessage());
+        }
+    }
+
+    // ===== FRIEND MANAGEMENT =====
+    
+    /**
+     * Lấy danh sách friends
+     */
+    public List<Users> getFriends() {
+        return chatService.listFriends(currentUserId);
+    }
+
+    /**
+     * Tìm kiếm friends
+     */
+    public void filterFriends(String keyword, Consumer<List<Users>> callback) {
         new Thread(() -> {
             try {
-                // 1. Kiểm tra friend tồn tại
-                Users friend = userDao.findById(friendUserId);
-                if (friend == null) {
-                    callback.accept(new OperationResult(false, "User not found"));
+                if (keyword == null || keyword.isEmpty()) {
+                    callback.accept(getFriends());
                     return;
                 }
-
-                // 2. Kiểm tra xem đã có conversation chưa
-                Conversation existing = chatService.getDirectConversation(currentUserId, friendUserId);
-                if (existing != null) {
-                    callback.accept(new OperationResult(true, "Conversation already exists", existing));
-                    return;
-                }
-
-                // 3. Tạo conversation mới
-                Conversation newConv = chatService.createDirectConversation(currentUserId, friendUserId);
                 
-                if (newConv != null) {
-                    System.out.println("✅ Created direct conversation: " + newConv.getId());
-                    
-                    // 4. Kết nối P2P với friend (nếu online)
-                    connectToPeerIfOnline(friendUserId);
-                    
-                    callback.accept(new OperationResult(true, "Conversation created", newConv));
-                } else {
-                    callback.accept(new OperationResult(false, "Failed to create conversation"));
-                }
-
+                List<Users> allFriends = getFriends();
+                List<Users> filtered = allFriends.stream()
+                    .filter(f -> f.getDisplayName().toLowerCase().contains(keyword.toLowerCase()) ||
+                                f.getUsername().toLowerCase().contains(keyword.toLowerCase()))
+                    .toList();
+                
+                callback.accept(filtered);
             } catch (Exception e) {
-                callback.accept(new OperationResult(false, "Error: " + e.getMessage()));
-                e.printStackTrace();
+                System.err.println("❌ Error filtering friends: " + e.getMessage());
+                callback.accept(new ArrayList<>());
             }
         }).start();
     }
 
-    // ===== CREATE GROUP CONVERSATION =====
     /**
-     * Tạo nhóm chat với nhiều thành viên
-     * @param groupName Tên nhóm
-     * @param memberUsernames Mảng username của các thành viên
-     * @param callback Callback trả về kết quả
+     * Tìm kiếm users
      */
-    public void createGroupConversation(String groupName, String[] memberUsernames, Consumer<OperationResult> callback) {
+    public List<Users> searchUsers(String keyword) {
+        try {
+            return chatService.searchUser(keyword);
+        } catch (Exception e) {
+            System.err.println("❌ Error searching users: " + e.getMessage());
+            return new ArrayList<>();
+        }
+    }
+
+    // ===== GROUP MANAGEMENT =====
+    
+    /**
+     * Tạo group conversation
+     */
+    public void createGroupConversation(String groupName, String[] memberUsernames, 
+                                       Consumer<OperationResult> callback) {
         new Thread(() -> {
             try {
-                // 1. Validate input
                 if (groupName == null || groupName.trim().isEmpty()) {
                     callback.accept(new OperationResult(false, "Group name is required"));
                     return;
@@ -168,9 +345,8 @@ public class ChatController {
                     return;
                 }
 
-                // 2. Tìm tất cả member IDs
                 List<Integer> memberIds = new ArrayList<>();
-                memberIds.add(currentUserId); // Thêm chính mình vào nhóm
+                memberIds.add(currentUserId);
 
                 for (String username : memberUsernames) {
                     String trimmed = username.trim();
@@ -192,193 +368,27 @@ public class ChatController {
                     return;
                 }
 
-                // 3. Tạo group conversation 
+                // TODO: Create group in database
+                // Conversation group = chatService.createGroupConversation(groupName, memberIds);
                 
-                Conversation group = createGroupInDatabase(groupName.trim(), memberIds);
-                
-                if (group != null) {
-                    System.out.println("✅ Created group conversation: " + group.getId());
-                    
-                    // 4. Kết nối P2P với tất cả members
-                    for (Integer memberId : memberIds) {
-                        if (!memberId.equals(currentUserId)) {
-                            connectToPeerIfOnline(memberId);
-                        }
-                    }
-                    
-                    callback.accept(new OperationResult(true, "Group created successfully", group));
-                } else {
-                    callback.accept(new OperationResult(false, "Failed to create group"));
-                }
+                callback.accept(new OperationResult(false, "Group creation - Not implemented yet"));
 
             } catch (Exception e) {
                 callback.accept(new OperationResult(false, "Error: " + e.getMessage()));
-                e.printStackTrace();
             }
         }).start();
     }
 
     /**
-     * Helper method để tạo group trong database
-     * Bạn cần implement method này trong ConversationDao/ChatService
+     * Đổi tên group
      */
-    private Conversation createGroupInDatabase(String groupName, List<Integer> memberIds) {
-        try {
-            // Sử dụng Hibernate để tạo group conversation
-            org.hibernate.Session session = config.HibernateUtil.getSessionFactory().openSession();
-            org.hibernate.Transaction tx = session.beginTransaction();
-
-            // Tạo Conversation entity
-            Conversation conv = new Conversation();
-            conv.setType(Conversation.ConversationType.group);
-            conv.setName(groupName);
-            conv.setCreatedBy(session.get(Users.class, currentUserId));
-            conv.setCreatedAt(java.time.LocalDateTime.now());
-            conv.setUpdatedAt(java.time.LocalDateTime.now());
-
-            session.save(conv);
-
-            // Tạo Participant cho từng member
-            for (Integer memberId : memberIds) {
-                model.Participant participant = new model.Participant();
-                participant.setConversation(conv);
-                participant.setUser(session.get(Users.class, memberId));
-                participant.setJoinedAt(java.time.LocalDateTime.now());
-                session.save(participant);
-            }
-
-            tx.commit();
-            session.close();
-
-            return conv;
-
-        } catch (Exception e) {
-            e.printStackTrace();
-            return null;
-        }
-    }
-
-    // ===== TYPING INDICATORS =====
-    /**
-     * Gửi typing start indicator
-     */
-    public void sendTypingStart(Integer conversationId) {
-        try {
-            p2pManager.sendTypingStart(conversationId);
-        } catch (Exception e) {
-            System.err.println("❌ Error sending typing start: " + e.getMessage());
-        }
-    }
-
-    /**
-     * Gửi typing stop indicator
-     */
-    public void sendTypingStop(Integer conversationId) {
-        try {
-            p2pManager.sendTypingStop(conversationId);
-        } catch (Exception e) {
-            System.err.println("❌ Error sending typing stop: " + e.getMessage());
-        }
-    }
-
-    // ===== MARK MESSAGE AS SEEN =====
-    /**
-     * Đánh dấu message đã đọc
-     */
-    public void markMessageAsSeen(Integer messageId) {
-        try {
-            Message message = chatService.getMessageById(messageId);
-            if (message == null) return;
-
-            // Đánh dấu trong DB
-            chatService.markMessageSeen(messageId, currentUserId);
-
-            // Gửi thông báo P2P tới sender
-            Integer senderId = message.getSender().getId();
-            if (!senderId.equals(currentUserId)) {
-                // Bạn có thể thêm method sendMessageSeen trong P2PManager nếu cần
-                System.out.println("✅ Marked message " + messageId + " as seen");
-            }
-
-        } catch (Exception e) {
-            System.err.println("❌ Error marking message as seen: " + e.getMessage());
-        }
-    }
-
-    // ===== LOAD CONVERSATIONS =====
-    /**
-     * Lấy danh sách conversations của user
-     */
-    public List<Conversation> getConversations() {
-        try {
-            return chatService.listConversationsByUser(currentUserId);
-        } catch (Exception e) {
-            System.err.println("❌ Error loading conversations: " + e.getMessage());
-            return new ArrayList<>();
-        }
-    }
-
-    // ===== LOAD MESSAGES =====
-    /**
-     * Lấy danh sách messages trong một conversation
-     */
-    public List<Message> getMessages(Integer conversationId) {
-        try {
-            List<Message> messages = chatService.listMessages(conversationId);
-            
-            // Reset unread count khi xem conversation
-            chatService.resetUnread(conversationId, currentUserId);
-            
-            return messages;
-        } catch (Exception e) {
-            System.err.println("❌ Error loading messages: " + e.getMessage());
-            return new ArrayList<>();
-        }
-    }
-
-    // ===== P2P CONNECTION HELPERS =====
-    /**
-     * Kết nối P2P với một peer nếu họ đang online
-     */
-    private void connectToPeerIfOnline(Integer userId) {
-        try {
-            network.p2p.PeerInfo peer = network.p2p.PeerDiscoveryService.getInstance().getPeer(userId);
-            if (peer != null) {
-                boolean connected = p2pManager.connectToPeer(userId);
-                if (connected) {
-                    System.out.println("✅ Connected to peer: " + userId);
-                } else {
-                    System.err.println("⚠️ Failed to connect to peer: " + userId);
-                }
-            } else {
-                System.out.println("ℹ️ Peer not online: " + userId);
-            }
-        } catch (Exception e) {
-            System.err.println("❌ Error connecting to peer: " + e.getMessage());
-        }
-    }
-
-    // ===== SEARCH USERS =====
-    /**
-     * Tìm kiếm users theo keyword
-     */
-    public List<Users> searchUsers(String keyword) {
-        try {
-            return chatService.searchUser(keyword);
-        } catch (Exception e) {
-            System.err.println("❌ Error searching users: " + e.getMessage());
-            return new ArrayList<>();
-        }
-    }
-
-    // ===== UPDATE GROUP NAME =====
-    /**
-     * Đổi tên nhóm (chỉ group conversation)
-     */
-    public void updateGroupName(Integer conversationId, String newName, Consumer<OperationResult> callback) {
+    public void updateGroupName(Integer conversationId, String newName, 
+                               Consumer<OperationResult> callback) {
         new Thread(() -> {
             try {
-                boolean success = chatService.updateConversationName(conversationId, newName, currentUserId);
+                boolean success = chatService.updateConversationName(
+                    conversationId, newName, currentUserId
+                );
                 
                 if (success) {
                     callback.accept(new OperationResult(true, "Group name updated"));
@@ -391,37 +401,143 @@ public class ChatController {
         }).start();
     }
 
-    // ===== GET CONVERSATION INFO =====
-    /**
-     * Lấy thông tin chi tiết conversation
-     */
-    public Conversation getConversationInfo(Integer conversationId) {
-        try {
-            return chatService.getConversationById(conversationId);
-        } catch (Exception e) {
-            System.err.println("❌ Error getting conversation info: " + e.getMessage());
-            return null;
-        }
+    // ===== CALLBACK SETTERS =====
+    
+    public void setMessageReceivedCallback(MessageReceivedCallback callback) {
+        this.messageReceivedCallback = callback;
     }
 
-    /**
-     * Lấy danh sách participants trong conversation
-     */
-    public List<Users> getParticipants(Integer conversationId) {
-        try {
-            return chatService.listParticipants(conversationId);
-        } catch (Exception e) {
-            System.err.println("❌ Error getting participants: " + e.getMessage());
-            return new ArrayList<>();
+    public void setTypingCallback(TypingCallback callback) {
+        this.typingCallback = callback;
+    }
+
+    public void setConnectionLostCallback(ConnectionLostCallback callback) {
+        this.connectionLostCallback = callback;
+    }
+
+    // ===== P2P LISTENERS =====
+    
+    private void setupP2PListeners() {
+        p2pManager.setEventListener(new P2PManager.P2PEventListener() {
+            @Override
+            public void onChatMessageReceived(Integer conversationId, Message message) {
+                if (messageReceivedCallback != null) {
+                    messageReceivedCallback.onMessageReceived(conversationId, message);
+                }
+            }
+
+            @Override
+            public void onTypingReceived(Integer conversationId, Integer userId) {
+                if (typingCallback != null) {
+                    Users user = userDao.findById(userId);
+                    String userName = user != null ? user.getDisplayName() : "User" + userId;
+                    typingCallback.onTyping(conversationId, userId, userName);
+                }
+            }
+
+            @Override
+            public void onConnectionLost(Integer userId) {
+                if (connectionLostCallback != null) {
+                    connectionLostCallback.onConnectionLost(userId);
+                }
+            }
+
+            // ===== FILE TRANSFER EVENTS - Delegate to FileTransferController =====
+            
+            @Override
+            public void onFileRequested(Integer fromUser, String fileId, String fileName, Long fileSize) {
+                fileTransferController.handleFileRequest(fromUser, fileId, fileName, fileSize);
+            }
+
+            @Override
+            public void onFileAccepted(Integer fromUser, String fileId) {
+                fileTransferController.handleFileAccepted(fromUser, fileId);
+            }
+
+            @Override
+            public void onFileRejected(Integer fromUser, String fileId, String reason) {
+                fileTransferController.handleFileRejected(fromUser, fileId, reason);
+            }
+
+            @Override
+            public void onFileProgress(String fileId, int progress, boolean isUpload) {
+                fileTransferController.handleFileProgress(fileId, progress, isUpload);
+            }
+
+            @Override
+            public void onFileComplete(String fileId, java.io.File file, boolean isUpload) {
+                fileTransferController.handleFileComplete(fileId, file, isUpload);
+            }
+
+            @Override
+            public void onFileCanceled(String fileId, boolean isUpload) {
+                fileTransferController.handleFileCanceled(fileId, isUpload);
+            }
+
+            @Override
+            public void onFileError(String fileId, String error) {
+                fileTransferController.handleFileError(fileId, error);
+            }
+
+            // ===== AUDIO CALL EVENTS - Delegate to AudioController =====
+            
+//            @Override
+//            public void onAudioCallRequested(Integer fromUser, String callId) {
+//                audioController.handleCallRequest(fromUser, callId);
+//            }
+//
+//            @Override
+//            public void onAudioCallAccepted(Integer fromUser, String callId) {
+//                audioController.handleCallAccepted(fromUser, callId);
+//            }
+//
+//            @Override
+//            public void onAudioCallRejected(Integer fromUser, String callId, String reason) {
+//                audioController.handleCallRejected(fromUser, callId, reason);
+//            }
+//
+//            @Override
+//            public void onAudioCallStarted(String callId) {
+//                audioController.handleCallStarted(callId);
+//            }
+//
+//            @Override
+//            public void onAudioCallEnded(String callId) {
+//                audioController.handleCallEnded(callId);
+//            }
+//
+//            @Override
+//            public void onAudioCallError(String callId, String error) {
+//                audioController.handleCallError(callId, error);
+//            }
+        });
+    }
+
+    // ===== RESULT CLASS =====
+    
+    public static class OperationResult {
+        public boolean success;
+        public String message;
+        public Object data;
+
+        public OperationResult(boolean success, String message) {
+            this.success = success;
+            this.message = message;
+        }
+
+        public OperationResult(boolean success, String message, Object data) {
+            this.success = success;
+            this.message = message;
+            this.data = data;
         }
     }
 
     // ===== CLEANUP =====
-    /**
-     * Cleanup khi đóng ứng dụng
-     */
+    
     public void shutdown() {
         try {
+            fileTransferController.shutdown();
+            //audioController.shutdown();
             p2pManager.shutdown();
             System.out.println("✅ ChatController shutdown complete");
         } catch (Exception e) {

@@ -36,12 +36,12 @@ public class P2PManager implements PeerConnection.P2PMessageHandler {
         void onFileError(String fileId, String error);
         
         // Audio call events
-        void onAudioCallRequested(Integer fromUser, String callId);
-        void onAudioCallAccepted(Integer fromUser, String callId);
-        void onAudioCallRejected(Integer fromUser, String callId, String reason);
-        void onAudioCallStarted(String callId);
-        void onAudioCallEnded(String callId);
-        void onAudioCallError(String callId, String error);
+//        void onAudioCallRequested(Integer fromUser, String callId);
+//        void onAudioCallAccepted(Integer fromUser, String callId);
+//        void onAudioCallRejected(Integer fromUser, String callId, String reason);
+//        void onAudioCallStarted(String callId);
+//        void onAudioCallEnded(String callId);
+//        void onAudioCallError(String callId, String error);
         
         void onConnectionLost(Integer userId);
     }
@@ -328,9 +328,9 @@ public class P2PManager implements PeerConnection.P2PMessageHandler {
         String callId = (String) msg.data.get("callId");
         String reason = (String) msg.data.get("reason");
         
-        if (eventListener != null) {
-            eventListener.onAudioCallRejected(msg.from, callId, reason);
-        }
+//        if (eventListener != null) {
+//            eventListener.onAudioCallRejected(msg.from, callId, reason);
+//        }
     }
 
     private void handleMessageSeen(P2PMessageProtocol.Message msg) {
@@ -400,42 +400,42 @@ public class P2PManager implements PeerConnection.P2PMessageHandler {
             @Override
             public void onCallRequested(Integer fromUser, String callId) {
                 if (eventListener != null) {
-                    eventListener.onAudioCallRequested(fromUser, callId);
+                    //eventListener.onAudioCallRequested(fromUser, callId);
                 }
             }
 
             @Override
             public void onCallAccepted(Integer fromUser, String callId) {
                 if (eventListener != null) {
-                    eventListener.onAudioCallAccepted(fromUser, callId);
+                    //eventListener.onAudioCallAccepted(fromUser, callId);
                 }
             }
 
             @Override
             public void onCallRejected(Integer fromUser, String callId, String reason) {
                 if (eventListener != null) {
-                    eventListener.onAudioCallRejected(fromUser, callId, reason);
+                    //eventListener.onAudioCallRejected(fromUser, callId, reason);
                 }
             }
 
             @Override
             public void onCallStarted(String callId) {
                 if (eventListener != null) {
-                    eventListener.onAudioCallStarted(callId);
+                    //eventListener.onAudioCallStarted(callId);
                 }
             }
 
             @Override
             public void onCallEnded(String callId) {
                 if (eventListener != null) {
-                    eventListener.onAudioCallEnded(callId);
+                    //eventListener.onAudioCallEnded(callId);
                 }
             }
 
             @Override
             public void onCallError(String callId, String error) {
                 if (eventListener != null) {
-                    eventListener.onAudioCallError(callId, error);
+                    //eventListener.onAudioCallError(callId, error);
                 }
             }
         });

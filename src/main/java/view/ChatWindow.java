@@ -104,6 +104,9 @@ public class ChatWindow {
             if (chatController != null) {
                 chatController.shutdown();
             }
+            // Exit the application completely
+            Platform.exit();
+            System.exit(0);
         });
         
         stage.show();
@@ -639,6 +642,11 @@ public class ChatWindow {
     }
 
     private void openChatWithUser(Users friend) {
+        // If already chatting with this user, don't reload
+        if (currentChatUser != null && currentChatUser.getId().equals(friend.getId()) && currentConversation != null) {
+            return;
+        }
+
         currentChatUser = friend;
         chatTitleLabel.setText(friend.getDisplayName());
         
@@ -668,16 +676,23 @@ public class ChatWindow {
         String content = messageInput.getText().trim();
         if (content.isEmpty() || currentConversation == null) return;
 
-        chatController.sendMessage(currentConversation.getId(), content);
-        
-        // Display immediately
-        Message tempMsg = new Message();
-        tempMsg.setContent(content);
-        tempMsg.setSender(chatService.getUserById(currentUserId));
-        tempMsg.setCreatedAt(java.time.LocalDateTime.now());
-        displayMessage(tempMsg, true);
-        
+        // Clear input immediately after validation
         messageInput.clear();
+
+        try {
+            chatController.sendMessage(currentConversation.getId(), content, null);
+            
+            // Display immediately
+            Message tempMsg = new Message();
+            tempMsg.setContent(content);
+            tempMsg.setSender(chatService.getUserById(currentUserId));
+            tempMsg.setCreatedAt(java.time.LocalDateTime.now());
+            displayMessage(tempMsg, true);
+        } catch (Exception e) {
+            // If sending failed, show error and restore text
+            showAlert("Error", "Failed to send message: " + e.getMessage());
+            messageInput.setText(content); // Restore text if failed
+        }
     }
 
     private void startStatusRefreshTimer() {
@@ -900,61 +915,61 @@ public class ChatWindow {
     	        
     	        // ===== AUDIO CALL EVENTS =====
     	        
-    	        @Override
-    	        public void onAudioCallRequested(Integer fromUser, String callId) {
-    	            Platform.runLater(() -> {
-    	                Users caller = chatService.getUserById(fromUser);
-    	                String callerName = caller != null ? caller.getDisplayName() : "User" + fromUser;
-    	                
-    	                Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
-    	                alert.setTitle("Incoming Call");
-    	                alert.setHeaderText(callerName + " is calling you");
-    	                alert.setContentText("Do you want to answer?");
-    	                
-    	                alert.showAndWait().ifPresent(response -> {
-    	                    if (response == ButtonType.OK) {
-    	                        p2pManager.acceptAudioCall(callId);
-    	                        showAudioCallDialog(callId, "Connected", true);
-    	                    } else {
-    	                        p2pManager.rejectAudioCall(callId, "User declined");
-    	                    }
-    	                });
-    	            });
-    	        }
+//    	        @Override
+//    	        public void onAudioCallRequested(Integer fromUser, String callId) {
+//    	            Platform.runLater(() -> {
+//    	                Users caller = chatService.getUserById(fromUser);
+//    	                String callerName = caller != null ? caller.getDisplayName() : "User" + fromUser;
+//    	                
+//    	                Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
+//    	                alert.setTitle("Incoming Call");
+//    	                alert.setHeaderText(callerName + " is calling you");
+//    	                alert.setContentText("Do you want to answer?");
+//    	                
+//    	                alert.showAndWait().ifPresent(response -> {
+//    	                    if (response == ButtonType.OK) {
+//    	                        p2pManager.acceptAudioCall(callId);
+//    	                        showAudioCallDialog(callId, "Connected", true);
+//    	                    } else {
+//    	                        p2pManager.rejectAudioCall(callId, "User declined");
+//    	                    }
+//    	                });
+//    	            });
+//    	        }
 
-    	        @Override
-    	        public void onAudioCallAccepted(Integer fromUser, String callId) {
-    	            updateAudioCallStatus(callId, "Connected");
-    	        }
-
-    	        @Override
-    	        public void onAudioCallRejected(Integer fromUser, String callId, String reason) {
-    	            Platform.runLater(() -> {
-    	                closeAudioCallDialog(callId);
-    	                showAlert("Call Rejected", "The recipient declined the call");
-    	            });
-    	        }
-
-    	        @Override
-    	        public void onAudioCallStarted(String callId) {
-    	            updateAudioCallStatus(callId, "Active");
-    	        }
-
-    	        @Override
-    	        public void onAudioCallEnded(String callId) {
-    	            Platform.runLater(() -> {
-    	                closeAudioCallDialog(callId);
-    	                showAlert("Call Ended", "The call has ended");
-    	            });
-    	        }
-
-    	        @Override
-    	        public void onAudioCallError(String callId, String error) {
-    	            Platform.runLater(() -> {
-    	                closeAudioCallDialog(callId);
-    	                showAlert("Call Error", error);
-    	            });
-    	        }
+//    	        @Override
+//    	        public void onAudioCallAccepted(Integer fromUser, String callId) {
+//    	            updateAudioCallStatus(callId, "Connected");
+//    	        }
+//
+//    	        @Override
+//    	        public void onAudioCallRejected(Integer fromUser, String callId, String reason) {
+//    	            Platform.runLater(() -> {
+//    	                closeAudioCallDialog(callId);
+//    	                showAlert("Call Rejected", "The recipient declined the call");
+//    	            });
+//    	        }
+//
+//    	        @Override
+//    	        public void onAudioCallStarted(String callId) {
+//    	            updateAudioCallStatus(callId, "Active");
+//    	        }
+//
+//    	        @Override
+//    	        public void onAudioCallEnded(String callId) {
+//    	            Platform.runLater(() -> {
+//    	                closeAudioCallDialog(callId);
+//    	                showAlert("Call Ended", "The call has ended");
+//    	            });
+//    	        }
+//
+//    	        @Override
+//    	        public void onAudioCallError(String callId, String error) {
+//    	            Platform.runLater(() -> {
+//    	                closeAudioCallDialog(callId);
+//    	                showAlert("Call Error", error);
+//    	            });
+//    	        }
 
     	        @Override
     	        public void onConnectionLost(Integer userId) {
