@@ -42,8 +42,6 @@ public class PeerConnection {
     public PeerConnection(PeerInfo remotePeer) {
         this.remotePeer = remotePeer;
     }
-
-    // ===== TCP CONNECTION =====
     
     /**
      * Kết nối TCP tới peer

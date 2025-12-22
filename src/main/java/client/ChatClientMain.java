@@ -69,25 +69,6 @@ public class ChatClientMain {
                 System.out.println("⚠️  Connection lost with " + getUserName(userId));
             }
 
-
-			@Override
-			public void onFileRequested(Integer fromUser, String fileId, String fileName, Long fileSize) {
-				// TODO Auto-generated method stub
-				
-			}
-
-			@Override
-			public void onFileAccepted(Integer fromUser, String fileId) {
-				// TODO Auto-generated method stub
-				
-			}
-
-			@Override
-			public void onFileRejected(Integer fromUser, String fileId, String reason) {
-				// TODO Auto-generated method stub
-				
-			}
-
 			@Override
 			public void onFileProgress(String fileId, int progress, boolean isUpload) {
 				// TODO Auto-generated method stub

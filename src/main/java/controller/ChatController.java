@@ -8,6 +8,7 @@ import network.p2p.P2PManager;
 import network.p2p.PeerInfo;
 import network.p2p.PeerDiscoveryService;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -36,7 +37,7 @@ public class ChatController {
     private final FileTransferController fileTransferController;
     //private final AudioController audioController;
     
-    // Callbacks for UI
+   
     private MessageReceivedCallback messageReceivedCallback;
     private TypingCallback typingCallback;
     private ConnectionLostCallback connectionLostCallback;
@@ -138,14 +139,7 @@ public class ChatController {
         }
     }
 
-    // ===== MESSAGE MANAGEMENT - IDEMPOTENT =====
-    
-    /**
-     * Gửi tin nhắn text với clientMessageId (Idempotent)
-     * Client tự generate clientMessageId và gửi kèm
-     */
-    public void sendMessageWithClientId(Integer conversationId, String content, 
-                                       String clientMessageId, MessageCallback callback) {
+    public void sendMessageWithClientId(Integer conversationId, String content,  String clientMessageId, MessageCallback callback) {
         if (content == null || content.trim().isEmpty()) {
             if (callback != null) callback.onError("Cannot send empty message");
             return;
@@ -469,31 +463,14 @@ public class ChatController {
                 }
             }
 
-            // ===== FILE TRANSFER EVENTS - Delegate to FileTransferController =====
-            
-            @Override
-            public void onFileRequested(Integer fromUser, String fileId, String fileName, Long fileSize) {
-                fileTransferController.handleFileRequest(fromUser, fileId, fileName, fileSize);
-            }
-
-            @Override
-            public void onFileAccepted(Integer fromUser, String fileId) {
-                fileTransferController.handleFileAccepted(fromUser, fileId);
-            }
-
-            @Override
-            public void onFileRejected(Integer fromUser, String fileId, String reason) {
-                fileTransferController.handleFileRejected(fromUser, fileId, reason);
-            }
-
             @Override
             public void onFileProgress(String fileId, int progress, boolean isUpload) {
                 fileTransferController.handleFileProgress(fileId, progress, isUpload);
             }
 
             @Override
-            public void onFileComplete(String fileId, java.io.File file, boolean isUpload) {
-                fileTransferController.handleFileComplete(fileId, file, isUpload);
+            public void onFileComplete(String fileId, File file, boolean isUpload) {
+                fileTransferController.handleFileComplete(fileId);
             }
 
             @Override
@@ -505,6 +482,8 @@ public class ChatController {
             public void onFileError(String fileId, String error) {
                 fileTransferController.handleFileError(fileId, error);
             }
+
+		
 
             // ===== AUDIO CALL EVENTS - Delegate to AudioController =====
             

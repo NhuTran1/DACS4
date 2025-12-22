@@ -746,59 +746,6 @@ public class ChatWindow {
     	            });
     	        }
 
-    	        // ===== FILE TRANSFER EVENTS =====
-    	        
-    	        @Override
-    	        public void onFileRequested(Integer fromUser, String fileId, String fileName, Long fileSize) {
-    	            Platform.runLater(() -> {
-    	                Users sender = chatService.getUserById(fromUser);
-    	                String senderName = sender != null ? sender.getDisplayName() : "User" + fromUser;
-    	                
-    	                // Custom styled alert
-    	                Alert alert = createStyledAlert(Alert.AlertType.CONFIRMATION);
-    	                alert.setTitle("Incoming File");
-    	                alert.setHeaderText(senderName + " wants to send you a file");
-    	                
-    	                // Content with file info
-    	                VBox content = new VBox(10);
-    	                content.setPadding(new Insets(15));
-    	                
-    	                Label fileNameLabel = new Label("📄 " + fileName);
-    	                fileNameLabel.setFont(Font.font("System", FontWeight.BOLD, 14));
-    	                
-    	                Label sizeLabel = new Label("Size: " + formatFileSize(fileSize));
-    	                sizeLabel.setFont(Font.font(13));
-    	                
-    	                content.getChildren().addAll(fileNameLabel, sizeLabel);
-    	                alert.getDialogPane().setContent(content);
-    	                
-    	                alert.showAndWait().ifPresent(response -> {
-    	                    if (response == ButtonType.OK) {
-    	                        p2pManager.acceptFile(fileId);
-    	                        showFileProgressDialog(fileId, fileName, false);
-    	                    } else {
-    	                        p2pManager.rejectFile(fileId, "User declined");
-    	                    }
-    	                });
-    	            });
-    	        }
-
-    	        @Override
-    	        public void onFileAccepted(Integer fromUser, String fileId) {
-    	            Platform.runLater(() -> {
-    	                System.out.println("✅ File accepted by peer");
-    	                // Progress dialog already shown
-    	            });
-    	        }
-
-    	        @Override
-    	        public void onFileRejected(Integer fromUser, String fileId, String reason) {
-    	            Platform.runLater(() -> {
-    	                closeFileProgressDialog(fileId);
-    	                showAlert("File Rejected", "The recipient declined the file: " + reason);
-    	            });
-    	        }
-
     	        @Override
     	        public void onFileProgress(String fileId, int progress, boolean isUpload) {
     	            updateFileProgress(fileId, progress);
@@ -1063,16 +1010,26 @@ private void sendFileToConversation(File file) {
     }
 
     try {
-        // Send file via P2P
-        String fileId = p2pManager.sendFile(targetUserId, file);
+        // Generate client message ID for idempotent sending
+        String clientMessageId = UUID.randomUUID().toString();
         
-        // Save file message to database
+        // Send file via P2P
+        String fileId = p2pManager.sendFile(
+        	    targetUserId,
+        	    file,
+        	    currentConversation.getId(),
+        	    clientMessageId
+        	);
+
+        
+        // Save file message to database (idempotent)
         String fileUrl = "file://" + file.getName() + "|" + formatFileSize(file.length());
-        Message fileMsg = chatService.sendMessage(
+        Message fileMsg = chatService.sendFileMessageIdempotent(
             currentConversation.getId(),
             currentUserId,
-            "[File] " + file.getName(),
-            fileUrl
+            file.getName(),
+            fileUrl,
+            clientMessageId
         );
         
         // Display in UI

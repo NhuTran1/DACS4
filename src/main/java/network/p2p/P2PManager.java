@@ -10,7 +10,7 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * P2PManager - Router with Idempotent support
+ * P2PManager - Router with Idempotent support and simplified file transfer
  */
 public class P2PManager implements PeerConnection.P2PMessageHandler {
     private final Integer localUserId;
@@ -29,10 +29,7 @@ public class P2PManager implements PeerConnection.P2PMessageHandler {
         void onChatMessageReceived(Integer conversationId, Message message);
         void onTypingReceived(Integer conversationId, Integer userId);
         
-        // File transfer events
-        void onFileRequested(Integer fromUser, String fileId, String fileName, Long fileSize);
-        void onFileAccepted(Integer fromUser, String fileId);
-        void onFileRejected(Integer fromUser, String fileId, String reason);
+        // File transfer events - simplified
         void onFileProgress(String fileId, int progress, boolean isUpload);
         void onFileComplete(String fileId, File file, boolean isUpload);
         void onFileCanceled(String fileId, boolean isUpload);
@@ -185,27 +182,14 @@ public class P2PManager implements PeerConnection.P2PMessageHandler {
         }
     }
 
-    // ===== FILE TRANSFER API =====
+    // ===== FILE TRANSFER API - SIMPLIFIED =====
 
     /**
-     * Gửi file tới user
+     * Gửi file tới user (trực tiếp, không cần request/accept)
      */
-    public String sendFile(Integer toUserId, File file) throws Exception {
-        return fileTransferManager.sendFileRequest(toUserId, file);
-    }
-
-    /**
-     * Accept nhận file
-     */
-    public void acceptFile(String fileId) {
-        fileTransferManager.acceptFile(fileId);
-    }
-
-    /**
-     * Reject nhận file
-     */
-    public void rejectFile(String fileId, String reason) {
-        fileTransferManager.rejectFile(fileId, reason);
+    public String sendFile(Integer toUserId, File file, Integer conversationId, 
+                          String clientMessageId) throws Exception {
+        return fileTransferManager.sendFile(toUserId, file, conversationId, clientMessageId);
     }
 
     /**
@@ -259,16 +243,10 @@ public class P2PManager implements PeerConnection.P2PMessageHandler {
                 case TYPING_START -> handleTypingStart(msg);
                 case TYPING_STOP -> handleTypingStop(msg);
                 
-                // File transfer
-                case FILE_REQUEST -> fileTransferManager.handleFileRequest(msg);
-                case FILE_ACCEPT -> fileTransferManager.handleFileAccept(
-                    (String) msg.data.get("fileId"), msg.from);
-                case FILE_REJECT -> handleFileReject(msg);
-                case FILE_CHUNK -> fileTransferManager.handleFileChunk(msg);
-                case FILE_COMPLETE -> fileTransferManager.handleFileComplete(
-                    (String) msg.data.get("fileId"));
-                case FILE_CANCEL -> fileTransferManager.handleFileCancel(
-                    (String) msg.data.get("fileId"));
+                // File transfer - simplified
+                case FILE_CHUNK -> handleFileChunk(msg);
+                case FILE_COMPLETE -> handleFileComplete(msg);
+                case FILE_CANCEL -> handleFileCancel(msg);
                 
                 // Audio call
                 case AUDIO_REQUEST -> audioCallManager.handleCallRequest(msg);
@@ -334,12 +312,52 @@ public class P2PManager implements PeerConnection.P2PMessageHandler {
         // UI có thể xử lý việc ẩn typing indicator
     }
 
-    private void handleFileReject(P2PMessageProtocol.Message msg) {
+    private void handleFileChunk(P2PMessageProtocol.Message msg) {
         String fileId = (String) msg.data.get("fileId");
-        String reason = (String) msg.data.get("reason");
+        Number chunkIndex = (Number) msg.data.get("chunkIndex");
+        Number totalChunks = (Number) msg.data.get("totalChunks");
+        String chunkDataB64 = (String) msg.data.get("chunkData");
+        
+        // Decode chunk data
+        byte[] chunkData = java.util.Base64.getDecoder().decode(chunkDataB64);
+        
+        // Metadata from first chunk
+        String fileName = null;
+        Long fileSize = null;
+        Integer conversationId = null;
+        String clientMessageId = null;
+        
+        if (chunkIndex.intValue() == 0) {
+            fileName = (String) msg.data.get("fileName");
+            Number fileSizeNum = (Number) msg.data.get("fileSize");
+            fileSize = fileSizeNum != null ? fileSizeNum.longValue() : null;
+            Number convId = (Number) msg.data.get("conversationId");
+            conversationId = convId != null ? convId.intValue() : null;
+            clientMessageId = (String) msg.data.get("clientMessageId");
+        }
+        
+        // Forward to FileTransferController via event listener
+        if (eventListener != null) {
+            // Store in temporary map if needed, or handle directly
+            handleFileChunkData(msg.from, fileId, chunkIndex.intValue(), chunkData, 
+                              totalChunks.intValue(), fileName, fileSize, 
+                              conversationId, clientMessageId);
+        }
+    }
+
+    private void handleFileComplete(P2PMessageProtocol.Message msg) {
+        String fileId = (String) msg.data.get("fileId");
         
         if (eventListener != null) {
-            eventListener.onFileRejected(msg.from, fileId, reason);
+            eventListener.onFileComplete(fileId, null, false);
+        }
+    }
+
+    private void handleFileCancel(P2PMessageProtocol.Message msg) {
+        String fileId = (String) msg.data.get("fileId");
+        
+        if (eventListener != null) {
+            eventListener.onFileCanceled(fileId, false);
         }
     }
 
@@ -359,31 +377,44 @@ public class P2PManager implements PeerConnection.P2PMessageHandler {
         }
     }
 
+    // Temporary storage for file chunks metadata
+    private final Map<String, FileChunkMetadata> fileChunkMetadata = new ConcurrentHashMap<>();
+    
+    private static class FileChunkMetadata {
+        String fileName;
+        Long fileSize;
+        Integer conversationId;
+        String clientMessageId;
+    }
+    
+    private void handleFileChunkData(Integer fromUser, String fileId, int chunkIndex, 
+                                    byte[] chunkData, int totalChunks, String fileName, 
+                                    Long fileSize, Integer conversationId, String clientMessageId) {
+        // Store metadata from first chunk
+        if (chunkIndex == 0 && fileName != null) {
+            FileChunkMetadata metadata = new FileChunkMetadata();
+            metadata.fileName = fileName;
+            metadata.fileSize = fileSize;
+            metadata.conversationId = conversationId;
+            metadata.clientMessageId = clientMessageId;
+            fileChunkMetadata.put(fileId, metadata);
+        }
+        
+        // Get metadata for subsequent chunks
+        FileChunkMetadata metadata = fileChunkMetadata.get(fileId);
+        if (metadata == null && chunkIndex > 0) {
+            System.err.println("❌ Missing metadata for file: " + fileId);
+            return;
+        }
+        
+        // This will be handled by FileTransferController through ChatController
+        // For now, just store the event
+    }
+
     // ===== SETUP LISTENERS =====
 
     private void setupFileTransferListener() {
         fileTransferManager.setListener(new FileTransferManager.FileTransferListener() {
-            @Override
-            public void onFileRequested(Integer fromUser, String fileId, String fileName, Long fileSize) {
-                if (eventListener != null) {
-                    eventListener.onFileRequested(fromUser, fileId, fileName, fileSize);
-                }
-            }
-
-            @Override
-            public void onFileAccepted(Integer fromUser, String fileId) {
-                if (eventListener != null) {
-                    eventListener.onFileAccepted(fromUser, fileId);
-                }
-            }
-
-            @Override
-            public void onFileRejected(Integer fromUser, String fileId, String reason) {
-                if (eventListener != null) {
-                    eventListener.onFileRejected(fromUser, fileId, reason);
-                }
-            }
-
             @Override
             public void onFileProgress(String fileId, int progress, boolean isUpload) {
                 if (eventListener != null) {
@@ -465,6 +496,15 @@ public class P2PManager implements PeerConnection.P2PMessageHandler {
     public void setEventListener(P2PEventListener listener) {
         this.eventListener = listener;
     }
+    
+    // Method to expose file chunk handling to FileTransferController
+    public FileChunkMetadata getFileMetadata(String fileId) {
+        return fileChunkMetadata.get(fileId);
+    }
+    
+    public void removeFileMetadata(String fileId) {
+        fileChunkMetadata.remove(fileId);
+    }
 
     // ===== CLEANUP =====
 
@@ -473,5 +513,6 @@ public class P2PManager implements PeerConnection.P2PMessageHandler {
         audioCallManager.shutdown();
         activeConnections.values().forEach(PeerConnection::closeAll);
         activeConnections.clear();
+        fileChunkMetadata.clear();
     }
 }

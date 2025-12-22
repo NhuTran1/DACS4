@@ -4,7 +4,6 @@ import network.p2p.P2PManager;
 import network.p2p.FileTransferManager;
 import service.ChatService;
 import dao.FileAttachmentDao;
-import dao.MessageDao;
 import model.FileAttachment;
 import model.Message;
 import model.Users;
@@ -20,19 +19,19 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * FileTransferController
+ * FileTransferController - với Idempotent support
  * 
  * Trách nhiệm:
- * - Quản lý việc gửi/nhận file qua P2P
+ * - Quản lý việc gửi/nhận file qua P2P (trực tiếp, không cần accept/reject)
  * - Theo dõi progress
  * - Xử lý resume/cancel
- * - Lưu metadata file vào DB
+ * - Lưu metadata file vào DB với idempotent
  * - Quản lý file storage trên disk
  * 
  * Phụ thuộc:
  * - P2PManager
  * - FileTransferManager
- * - ChatService (để lưu file message)
+ * - ChatService (để lưu file message với idempotent)
  * - FileAttachmentDao
  * 
  * KHÔNG phụ thuộc UI
@@ -42,7 +41,6 @@ public class FileTransferController {
     private final P2PManager p2pManager;
     private final ChatService chatService;
     private final FileAttachmentDao fileAttachmentDao;
-    private final MessageDao messageDao;
     private final Integer currentUserId;
     
     // Storage config
@@ -54,14 +52,9 @@ public class FileTransferController {
     private final Map<String, FileTransferContext> pendingTransfers = new ConcurrentHashMap<>();
     
     // Callbacks for UI
-    private FileRequestCallback fileRequestCallback;
     private FileProgressCallback fileProgressCallback;
     private FileCompleteCallback fileCompleteCallback;
     private FileErrorCallback fileErrorCallback;
-    
-    public interface FileRequestCallback {
-        void onFileRequested(Integer fromUserId, String fileId, String fileName, Long fileSize);
-    }
     
     public interface FileProgressCallback {
         void onProgress(String fileId, int progress);
@@ -84,16 +77,19 @@ public class FileTransferController {
         String fileName;
         Long fileSize;
         File sourceFile; // for upload
+        String clientMessageId; // for idempotent
         boolean isUpload;
         
         FileTransferContext(String fileId, Integer conversationId, Integer senderId, 
-                          Integer receiverId, String fileName, Long fileSize, boolean isUpload) {
+                          Integer receiverId, String fileName, Long fileSize, 
+                          String clientMessageId, boolean isUpload) {
             this.fileId = fileId;
             this.conversationId = conversationId;
             this.senderId = senderId;
             this.receiverId = receiverId;
             this.fileName = fileName;
             this.fileSize = fileSize;
+            this.clientMessageId = clientMessageId;
             this.isUpload = isUpload;
         }
     }
@@ -103,7 +99,6 @@ public class FileTransferController {
         this.chatService = chatService;
         this.currentUserId = currentUserId;
         this.fileAttachmentDao = new FileAttachmentDao();
-        this.messageDao = new MessageDao();
         
         initializeStorageDirectories();
     }
@@ -124,7 +119,7 @@ public class FileTransferController {
     // ===== PUBLIC API =====
     
     /**
-     * Gửi file tới user trong conversation
+     * Gửi file tới user trong conversation (với Idempotent)
      */
     public void sendFile(Integer conversationId, Integer toUserId, File file) {
         if (file == null || !file.exists()) {
@@ -133,21 +128,30 @@ public class FileTransferController {
         }
 
         try {
-            // 1. Generate unique file ID
+            // 1. Generate unique IDs
             String fileId = UUID.randomUUID().toString();
+            String clientMessageId = UUID.randomUUID().toString();
             
             // 2. Copy file to upload directory
             String storedFileName = fileId + "_" + file.getName();
             Path storagePath = Paths.get(UPLOAD_DIR, storedFileName);
             Files.copy(file.toPath(), storagePath, StandardCopyOption.REPLACE_EXISTING);
             
-            // 3. Create message in DB (SENDER)
-            Message message = new Message();
-            message.setConversation(chatService.getConversationById(conversationId));
-            message.setSender(chatService.getUserById(currentUserId));
-            message.setMessageType(Message.MessageType.FILE);
-            message.setContent("[File] " + file.getName());
-            messageDao.saveMessage(message);
+            // 3. Create message in DB với idempotent (SENDER)
+            String fileUrl = "file://" + file.getName() + "|" + formatFileSize(file.length());
+            Message message = chatService.sendFileMessageIdempotent(
+                conversationId,
+                currentUserId,
+                file.getName(),
+                fileUrl,
+                clientMessageId
+            );
+            
+            if (message == null) {
+                System.err.println("❌ Failed to save file message (duplicate or error)");
+                notifyError(fileId, "Failed to save message to database");
+                return;
+            }
             
             // 4. Create file attachment metadata
             FileAttachment attachment = new FileAttachment();
@@ -164,46 +168,27 @@ public class FileTransferController {
             // 5. Track transfer context
             FileTransferContext context = new FileTransferContext(
                 fileId, conversationId, currentUserId, toUserId,
-                file.getName(), file.length(), true
+                file.getName(), file.length(), clientMessageId, true
             );
             context.sourceFile = storagePath.toFile();
             pendingTransfers.put(fileId, context);
             
-            // 6. Send file via P2P
-            String p2pFileId = p2pManager.sendFile(toUserId, storagePath.toFile());
+            // 6. Send file via P2P (trực tiếp, không cần request/accept)
+            String p2pFileId = p2pManager.sendFile(
+                toUserId, 
+                storagePath.toFile(), 
+                conversationId, 
+                clientMessageId
+            );
             
             System.out.println("✅ File send initiated: " + fileId);
             System.out.println("   - Message ID: " + message.getId());
             System.out.println("   - Storage path: " + storagePath);
+            System.out.println("   - ClientMessageId: " + clientMessageId);
             
         } catch (Exception e) {
             notifyError(null, "Failed to send file: " + e.getMessage());
             e.printStackTrace();
-        }
-    }
-
-    /**
-     * Chấp nhận nhận file
-     */
-    public void acceptFile(String fileId) {
-        try {
-            p2pManager.acceptFile(fileId);
-            System.out.println("✅ File accepted: " + fileId);
-        } catch (Exception e) {
-            notifyError(fileId, "Failed to accept file: " + e.getMessage());
-        }
-    }
-
-    /**
-     * Từ chối nhận file
-     */
-    public void rejectFile(String fileId, String reason) {
-        try {
-            p2pManager.rejectFile(fileId, reason);
-            pendingTransfers.remove(fileId);
-            System.out.println("❌ File rejected: " + fileId);
-        } catch (Exception e) {
-            System.err.println("Error rejecting file: " + e.getMessage());
         }
     }
 
@@ -222,10 +207,6 @@ public class FileTransferController {
 
     // ===== CALLBACK SETTERS =====
     
-    public void setFileRequestCallback(FileRequestCallback callback) {
-        this.fileRequestCallback = callback;
-    }
-
     public void setFileProgressCallback(FileProgressCallback callback) {
         this.fileProgressCallback = callback;
     }
@@ -240,12 +221,6 @@ public class FileTransferController {
 
     // ===== INTERNAL METHODS =====
     
-    private void notifyFileRequest(Integer fromUserId, String fileId, String fileName, Long fileSize) {
-        if (fileRequestCallback != null) {
-            fileRequestCallback.onFileRequested(fromUserId, fileId, fileName, fileSize);
-        }
-    }
-
     private void notifyProgress(String fileId, int progress) {
         if (fileProgressCallback != null) {
             fileProgressCallback.onProgress(fileId, progress);
@@ -299,84 +274,112 @@ public class FileTransferController {
         return "application/octet-stream";
     }
 
-    // ===== PUBLIC METHODS FOR P2P EVENTS (called from ChatController) =====
+    // ===== PUBLIC METHODS FOR P2P EVENTS (called from P2PManager via ChatController) =====
     
     /**
-     * Called when file request is received
+     * Called when file chunk is received (first chunk contains metadata)
      */
-    public void handleFileRequest(Integer fromUserId, String fileId, String fileName, Long fileSize) {
-        // Track context for receiver
-        // Note: conversationId will be set when file is accepted
-        FileTransferContext context = new FileTransferContext(
-            fileId, null, fromUserId, currentUserId,
-            fileName, fileSize, false
-        );
-        pendingTransfers.put(fileId, context);
-        
-        notifyFileRequest(fromUserId, fileId, fileName, fileSize);
-    }
-
-    /**
-     * Called when file is accepted
-     */
-    public void handleFileAccepted(Integer fromUserId, String fileId) {
-        System.out.println("✅ File accepted by peer: " + fileId);
-    }
-
-    /**
-     * Called when file is rejected
-     */
-    public void handleFileRejected(Integer fromUserId, String fileId, String reason) {
-        pendingTransfers.remove(fileId);
-        notifyError(fileId, "File rejected: " + reason);
-    }
-
-    /**
-     * Called when file progress updates
-     */
-    public void handleFileProgress(String fileId, int progress, boolean isUpload) {
-        notifyProgress(fileId, progress);
+    public void handleFileChunk(Integer fromUserId, String fileId, int chunkIndex, 
+                               byte[] chunkData, int totalChunks, String fileName, 
+                               Long fileSize, Integer conversationId, String clientMessageId) {
+        try {
+            FileTransferContext context = pendingTransfers.get(fileId);
+            
+            // First chunk - initialize context
+            if (chunkIndex == 0) {
+                context = new FileTransferContext(
+                    fileId, conversationId, fromUserId, currentUserId,
+                    fileName, fileSize, clientMessageId, false
+                );
+                pendingTransfers.put(fileId, context);
+                
+                System.out.println("📥 Receiving file: " + fileName);
+                System.out.println("   - FileId: " + fileId);
+                System.out.println("   - Size: " + formatFileSize(fileSize));
+                System.out.println("   - ClientMessageId: " + clientMessageId);
+            }
+            
+            if (context == null) {
+                System.err.println("❌ Unexpected file chunk: " + fileId);
+                return;
+            }
+            
+            // Write chunk to temp file
+            String tempFileName = fileId + "_" + fileName;
+            Path tempPath = Paths.get(DOWNLOAD_DIR, tempFileName);
+            
+            if (chunkIndex == 0) {
+                // Create new file
+                Files.write(tempPath, chunkData);
+            } else {
+                // Append to existing file
+                Files.write(tempPath, chunkData, 
+                    java.nio.file.StandardOpenOption.APPEND);
+            }
+            
+            // Calculate progress
+            int progress = (int) (((chunkIndex + 1) * 100.0) / totalChunks);
+            notifyProgress(fileId, progress);
+            
+        } catch (Exception e) {
+            System.err.println("❌ Error handling file chunk: " + e.getMessage());
+            notifyError(fileId, e.getMessage());
+        }
     }
 
     /**
      * Called when file transfer completes
      */
-    public void handleFileComplete(String fileId, File receivedFile, boolean isUpload) {
+    public void handleFileComplete(String fileId) {
         FileTransferContext context = pendingTransfers.get(fileId);
         
-        if (!isUpload && context != null) {
-            // RECEIVER: Save file to download directory and create DB records
+        if (context == null) {
+            System.err.println("❌ Unknown file transfer: " + fileId);
+            return;
+        }
+        
+        if (!context.isUpload) {
+            // RECEIVER: Save file message to DB với idempotent
             try {
-                // 1. Move file to permanent storage
-                String storedFileName = fileId + "_" + context.fileName;
-                Path storagePath = Paths.get(DOWNLOAD_DIR, storedFileName);
-                Files.move(receivedFile.toPath(), storagePath, StandardCopyOption.REPLACE_EXISTING);
+                String tempFileName = fileId + "_" + context.fileName;
+                Path tempPath = Paths.get(DOWNLOAD_DIR, tempFileName);
                 
-                // 2. Find or create message
-                // In real scenario, message should be created by sender and synced
-                // For now, create placeholder message for receiver
-                Message message = createReceiverFileMessage(context, storagePath);
+                if (!Files.exists(tempPath)) {
+                    throw new IOException("File not found: " + tempPath);
+                }
+                
+                // Create message với idempotent
+                String fileUrl = "file://" + context.fileName + "|" + formatFileSize(context.fileSize);
+                Message message = chatService.sendFileMessageIdempotent(
+                    context.conversationId,
+                    context.senderId,
+                    context.fileName,
+                    fileUrl,
+                    context.clientMessageId
+                );
                 
                 if (message != null) {
-                    // 3. Create file attachment metadata
+                    // Create file attachment metadata
                     FileAttachment attachment = new FileAttachment();
                     attachment.setMessage(message);
                     attachment.setSender(chatService.getUserById(context.senderId));
                     attachment.setFileId(fileId);
                     attachment.setFileName(context.fileName);
-                    attachment.setFilePath(storagePath.toString());
+                    attachment.setFilePath(tempPath.toString());
                     attachment.setFileSize(context.fileSize);
-                    attachment.setMimeType(detectMimeType(storagePath.toFile()));
+                    attachment.setMimeType(detectMimeType(tempPath.toFile()));
                     
                     fileAttachmentDao.save(attachment);
                     
                     System.out.println("✅ File received and saved:");
                     System.out.println("   - File ID: " + fileId);
                     System.out.println("   - Message ID: " + message.getId());
-                    System.out.println("   - Storage path: " + storagePath);
+                    System.out.println("   - Storage path: " + tempPath);
+                } else {
+                    System.out.println("⚠️ Message already exists (idempotent): " + context.clientMessageId);
                 }
                 
-                notifyComplete(fileId, storagePath.toFile(), false);
+                notifyComplete(fileId, tempPath.toFile(), false);
                 
             } catch (Exception e) {
                 System.err.println("❌ Error saving received file: " + e.getMessage());
@@ -385,63 +388,35 @@ public class FileTransferController {
             }
         } else {
             // SENDER: File sent successfully
-            notifyComplete(fileId, receivedFile, true);
+            notifyComplete(fileId, context.sourceFile, true);
         }
         
         pendingTransfers.remove(fileId);
     }
 
-    /**
-     * Create message for receiver when file arrives
-     */
-    private Message createReceiverFileMessage(FileTransferContext context, Path storagePath) {
-        try {
-            // Get or find conversation
-            // In real app, conversation should be part of context
-            // For now, try to find direct conversation with sender
-            Integer conversationId = context.conversationId;
-            
-            if (conversationId == null) {
-                // Try to find direct conversation
-                model.Conversation conv = chatService.getDirectConversation(
-                    context.senderId, currentUserId
-                );
-                if (conv != null) {
-                    conversationId = conv.getId();
-                }
-            }
-            
-            if (conversationId == null) {
-                System.err.println("⚠️ Cannot determine conversation for file message");
-                return null;
-            }
-            
-            Message message = new Message();
-            message.setConversation(chatService.getConversationById(conversationId));
-            message.setSender(chatService.getUserById(context.senderId));
-            message.setMessageType(Message.MessageType.FILE);
-            message.setContent("[File] " + context.fileName);
-            
-            messageDao.saveMessage(message);
-            return message;
-            
-        } catch (Exception e) {
-            System.err.println("❌ Error creating receiver file message: " + e.getMessage());
-            return null;
-        }
-    }
-
-    /**
-     * Called when file transfer is canceled
-     */
     public void handleFileCanceled(String fileId, boolean isUpload) {
-        pendingTransfers.remove(fileId);
+        FileTransferContext context = pendingTransfers.remove(fileId);
+        
+        if (!isUpload && context != null) {
+            // Clean up incomplete download
+            try {
+                String tempFileName = fileId + "_" + context.fileName;
+                Path tempPath = Paths.get(DOWNLOAD_DIR, tempFileName);
+                if (Files.exists(tempPath)) {
+                    Files.delete(tempPath);
+                }
+            } catch (IOException e) {
+                System.err.println("⚠️ Error cleaning up canceled file: " + e.getMessage());
+            }
+        }
+        
         notifyError(fileId, "Transfer canceled");
     }
 
-    /**
-     * Called when file transfer error occurs
-     */
+    public void handleFileProgress(String fileId, int progress, boolean isUpload) {
+        notifyProgress(fileId, progress);
+    }
+
     public void handleFileError(String fileId, String error) {
         pendingTransfers.remove(fileId);
         notifyError(fileId, error);
@@ -459,7 +434,7 @@ public class FileTransferController {
     /**
      * Get all files in conversation
      */
-    public List<FileAttachment> getConversationFiles(Integer conversationId) {
+    public java.util.List<FileAttachment> getConversationFiles(Integer conversationId) {
         return fileAttachmentDao.findByConversationId(conversationId);
     }
 

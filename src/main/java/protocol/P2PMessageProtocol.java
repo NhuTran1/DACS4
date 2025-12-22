@@ -19,10 +19,7 @@ public class P2PMessageProtocol {
         TYPING_START,      // Bắt đầu typing
         TYPING_STOP,       // Dừng typing
         
-        // File transfer
-        FILE_REQUEST,      // Yêu cầu gửi file
-        FILE_ACCEPT,       // Chấp nhận nhận file
-        FILE_REJECT,       // Từ chối nhận file
+        // File transfer - Simplified (no request/accept/reject)
         FILE_CHUNK,        // Chunk của file
         FILE_COMPLETE,     // File đã gửi xong
         FILE_CANCEL,       // Hủy việc gửi file
@@ -98,53 +95,15 @@ public class P2PMessageProtocol {
         return gson.toJson(msg);
     }
 
-    // ===== FILE TRANSFER MESSAGES =====
+    // ===== FILE TRANSFER MESSAGES - SIMPLIFIED WITH IDEMPOTENT =====
     
     /**
-     * Yêu cầu gửi file
-     */
-    public static String buildFileRequest(Integer from, Integer to, String fileName, 
-                                          Long fileSize, String fileId) {
-        Message msg = new Message();
-        msg.type = MessageType.FILE_REQUEST.name();
-        msg.from = from;
-        msg.to = to;
-        msg.data.put("fileName", fileName);
-        msg.data.put("fileSize", fileSize);
-        msg.data.put("fileId", fileId);
-        return gson.toJson(msg);
-    }
-
-    /**
-     * Chấp nhận nhận file
-     */
-    public static String buildFileAccept(Integer from, Integer to, String fileId) {
-        Message msg = new Message();
-        msg.type = MessageType.FILE_ACCEPT.name();
-        msg.from = from;
-        msg.to = to;
-        msg.data.put("fileId", fileId);
-        return gson.toJson(msg);
-    }
-
-    /**
-     * Từ chối nhận file
-     */
-    public static String buildFileReject(Integer from, Integer to, String fileId, String reason) {
-        Message msg = new Message();
-        msg.type = MessageType.FILE_REJECT.name();
-        msg.from = from;
-        msg.to = to;
-        msg.data.put("fileId", fileId);
-        msg.data.put("reason", reason);
-        return gson.toJson(msg);
-    }
-
-    /**
-     * Gửi chunk của file
+     * Gửi chunk của file với metadata trong chunk đầu tiên
      */
     public static String buildFileChunk(Integer from, Integer to, String fileId, 
-                                       int chunkIndex, byte[] chunkData, int totalChunks) {
+                                       int chunkIndex, byte[] chunkData, int totalChunks,
+                                       String fileName, Long fileSize, Integer conversationId,
+                                       String clientMessageId) {
         Message msg = new Message();
         msg.type = MessageType.FILE_CHUNK.name();
         msg.from = from;
@@ -153,6 +112,15 @@ public class P2PMessageProtocol {
         msg.data.put("chunkIndex", chunkIndex);
         msg.data.put("totalChunks", totalChunks);
         msg.data.put("chunkData", Base64.getEncoder().encodeToString(chunkData));
+        
+        // Metadata chỉ gửi trong chunk đầu tiên
+        if (chunkIndex == 0) {
+            msg.data.put("fileName", fileName);
+            msg.data.put("fileSize", fileSize);
+            msg.data.put("conversationId", conversationId);
+            msg.data.put("clientMessageId", clientMessageId);
+        }
+        
         return gson.toJson(msg);
     }
 
