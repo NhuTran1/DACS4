@@ -13,6 +13,10 @@ import java.util.List;
 @AllArgsConstructor
 public class Message {
 
+	public enum MessageStatus{
+		PENDING, SENT, DELIVERED, FAILED
+	}
+	
     public enum MessageType {
         TEXT,
         FILE,
@@ -20,6 +24,10 @@ public class Message {
         IMAGE
     }
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status", nullable = false)
+    private MessageStatus status = MessageStatus.PENDING;
+    
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Integer id;
@@ -56,6 +64,12 @@ public class Message {
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
 
+    @Column(name = "retry_count", nullable = false)
+    private int retryCount = 0;
+
+    @Column(name = "last_retry_at")
+    private LocalDateTime lastRetryAt;
+    
     @PrePersist
     public void prePersist() {
         createdAt = LocalDateTime.now();

@@ -1,6 +1,7 @@
 package dao;
 
 import model.FileAttachment;
+import model.FileAttachment.FileStatus;
 import org.hibernate.Session;
 import org.hibernate.Transaction;
 import org.hibernate.query.Query;
@@ -9,30 +10,123 @@ import config.HibernateUtil;
 import java.util.List;
 
 /**
- * FileAttachmentDao - Quản lý file attachments trong database
- * 
- * Trách nhiệm:
- * - CRUD operations cho FileAttachment
- * - Query files theo conversation, user, fileId
- * - Tính toán storage usage
+ * FileAttachmentDao - Quản lý file attachments với status tracking
  */
 public class FileAttachmentDao {
 
     /**
      * Lưu file attachment mới
      */
-    public void save(FileAttachment attachment) {
+    public FileAttachment save(FileAttachment attachment) {
         Transaction tx = null;
         try (Session session = HibernateUtil.getSessionFactory().openSession()) {
             tx = session.beginTransaction();
+            
+            // Set default status if not set
+            if (attachment.getStatus() == null) {
+                attachment.setStatus(FileStatus.UPLOADING);
+            }
+            
             session.save(attachment);
             tx.commit();
             
-            System.out.println("✅ FileAttachment saved: " + attachment.getFileName());
+            System.out.println("✅ FileAttachment saved: " + attachment.getFileName() + 
+                             " (Status: " + attachment.getStatus() + ")");
+            return attachment;
         } catch (Exception e) {
             if (tx != null) tx.rollback();
             System.err.println("❌ Error saving FileAttachment: " + e.getMessage());
             e.printStackTrace();
+            return null;
+        }
+    }
+
+    /**
+     * Update file attachment status
+     */
+    public boolean updateStatus(Integer id, FileStatus newStatus) {
+        Transaction tx = null;
+        try (Session session = HibernateUtil.getSessionFactory().openSession()) {
+            tx = session.beginTransaction();
+            
+            FileAttachment attachment = session.get(FileAttachment.class, id);
+            if (attachment != null) {
+                attachment.setStatus(newStatus);
+                session.update(attachment);
+                tx.commit();
+                
+                System.out.println("✅ FileAttachment " + id + " status updated to: " + newStatus);
+                return true;
+            }
+            
+            tx.rollback();
+            return false;
+        } catch (Exception e) {
+            if (tx != null) tx.rollback();
+            System.err.println("❌ Error updating FileAttachment status: " + e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Update file attachment status by fileId
+     */
+    public boolean updateStatusByFileId(String fileId, FileStatus newStatus) {
+        Transaction tx = null;
+        try (Session session = HibernateUtil.getSessionFactory().openSession()) {
+            tx = session.beginTransaction();
+            
+            String sql = """
+                UPDATE file_attachment
+                SET status = :status, updated_at = NOW()
+                WHERE file_id = :fileId
+                """;
+            
+            Query<?> query = session.createNativeQuery(sql);
+            query.setParameter("status", newStatus.name());
+            query.setParameter("fileId", fileId);
+            
+            int rows = query.executeUpdate();
+            tx.commit();
+            
+            if (rows > 0) {
+                System.out.println("✅ FileAttachment " + fileId + " status updated to: " + newStatus);
+            }
+            
+            return rows > 0;
+        } catch (Exception e) {
+            if (tx != null) tx.rollback();
+            System.err.println("❌ Error updating FileAttachment status: " + e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Update checksum
+     */
+    public boolean updateChecksum(String fileId, String checksum) {
+        Transaction tx = null;
+        try (Session session = HibernateUtil.getSessionFactory().openSession()) {
+            tx = session.beginTransaction();
+            
+            String sql = """
+                UPDATE file_attachment
+                SET checksum = :checksum, updated_at = NOW()
+                WHERE file_id = :fileId
+                """;
+            
+            Query<?> query = session.createNativeQuery(sql);
+            query.setParameter("checksum", checksum);
+            query.setParameter("fileId", fileId);
+            
+            int rows = query.executeUpdate();
+            tx.commit();
+            
+            return rows > 0;
+        } catch (Exception e) {
+            if (tx != null) tx.rollback();
+            System.err.println("❌ Error updating checksum: " + e.getMessage());
+            return false;
         }
     }
 
@@ -56,6 +150,29 @@ public class FileAttachmentDao {
         } catch (Exception e) {
             System.err.println("❌ Error finding FileAttachment by fileId: " + e.getMessage());
             return null;
+        }
+    }
+
+    /**
+     * Get uploading files (for retry/resume)
+     */
+    public List<FileAttachment> getUploadingFiles(Integer userId) {
+        try (Session session = HibernateUtil.getSessionFactory().openSession()) {
+            String sql = """
+                SELECT *
+                FROM file_attachment
+                WHERE sender_id = :uid
+                  AND status = 'UPLOADING'
+                ORDER BY created_at ASC
+                """;
+            
+            Query<FileAttachment> query = session.createNativeQuery(sql, FileAttachment.class);
+            query.setParameter("uid", userId);
+            
+            return query.getResultList();
+        } catch (Exception e) {
+            System.err.println("❌ Error getting uploading files: " + e.getMessage());
+            return List.of();
         }
     }
 
@@ -113,6 +230,7 @@ public class FileAttachmentDao {
                 SELECT COALESCE(SUM(file_size), 0)
                 FROM file_attachment
                 WHERE sender_id = :userId
+                  AND status = 'COMPLETED'
                 """;
             
             Query<Number> query = session.createNativeQuery(sql);
@@ -187,6 +305,7 @@ public class FileAttachmentDao {
                 JOIN message m ON fa.message_id = m.id
                 WHERE m.conversation_id = :conversationId
                   AND fa.mime_type LIKE :mimeType
+                  AND fa.status = 'COMPLETED'
                 """;
             
             Query<Number> query = session.createNativeQuery(sql);
@@ -212,6 +331,7 @@ public class FileAttachmentDao {
                 JOIN message m ON fa.message_id = m.id
                 JOIN participant p ON m.conversation_id = p.conversation_id
                 WHERE p.user_id = :userId
+                  AND fa.status = 'COMPLETED'
                 ORDER BY fa.created_at DESC
                 LIMIT :limit
                 """;
@@ -238,6 +358,7 @@ public class FileAttachmentDao {
                 JOIN message m ON fa.message_id = m.id
                 WHERE m.conversation_id = :conversationId
                   AND fa.file_name LIKE :keyword
+                  AND fa.status = 'COMPLETED'
                 ORDER BY fa.created_at DESC
                 """;
             

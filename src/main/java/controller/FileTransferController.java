@@ -5,36 +5,42 @@ import network.p2p.FileTransferManager;
 import service.ChatService;
 import dao.FileAttachmentDao;
 import model.FileAttachment;
+import model.FileAttachment.FileStatus;
 import model.Message;
 import model.Users;
 
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
+import java.security.MessageDigest;
 import java.util.UUID;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * FileTransferController - với Idempotent support
+ * FileTransferController - với Status tracking và Checksum verification
  * 
- * Trách nhiệm:
- * - Quản lý việc gửi/nhận file qua P2P (trực tiếp, không cần accept/reject)
- * - Theo dõi progress
- * - Xử lý resume/cancel
- * - Lưu metadata file vào DB với idempotent
- * - Quản lý file storage trên disk
+ * Flow:
+ * SENDER:
+ * 1. Insert message (PENDING)
+ * 2. Insert file_attachment (UPLOADING)
+ * 3. Calculate checksum
+ * 4. Send chunks via P2P
+ * 5. On complete: Update file_attachment (COMPLETED), message (SENT)
+ * 6. On error: Update file_attachment (FAILED), message (FAILED)
  * 
- * Phụ thuộc:
- * - P2PManager
- * - FileTransferManager
- * - ChatService (để lưu file message với idempotent)
- * - FileAttachmentDao
- * 
- * KHÔNG phụ thuộc UI
+ * RECEIVER:
+ * 1. Receive chunks
+ * 2. Assemble file
+ * 3. Calculate checksum
+ * 4. Verify checksum
+ * 5. Save file locally
+ * 6. Insert file_attachment (COMPLETED)
+ * 7. Send ACK to sender
  */
 public class FileTransferController {
     
@@ -77,8 +83,11 @@ public class FileTransferController {
         String fileName;
         Long fileSize;
         File sourceFile; // for upload
-        String clientMessageId; // for idempotent
+        String clientMessageId;
+        String checksum; // SHA-256
         boolean isUpload;
+        Integer messageId;
+        Integer fileAttachmentId;
         
         FileTransferContext(String fileId, Integer conversationId, Integer senderId, 
                           Integer receiverId, String fileName, Long fileSize, 
@@ -119,7 +128,7 @@ public class FileTransferController {
     // ===== PUBLIC API =====
     
     /**
-     * Gửi file tới user trong conversation (với Idempotent)
+     * Gửi file tới user trong conversation (với Status tracking & Checksum)
      */
     public void sendFile(Integer conversationId, Integer toUserId, File file) {
         if (file == null || !file.exists()) {
@@ -137,7 +146,11 @@ public class FileTransferController {
             Path storagePath = Paths.get(UPLOAD_DIR, storedFileName);
             Files.copy(file.toPath(), storagePath, StandardCopyOption.REPLACE_EXISTING);
             
-            // 3. Create message in DB với idempotent (SENDER)
+            // 3. Calculate checksum BEFORE sending
+            String checksum = calculateChecksum(storagePath.toFile());
+            System.out.println("✅ File checksum calculated: " + checksum);
+            
+            // 4. Create message in DB (PENDING)
             String fileUrl = "file://" + file.getName() + "|" + formatFileSize(file.length());
             Message message = chatService.sendFileMessageIdempotent(
                 conversationId,
@@ -148,12 +161,12 @@ public class FileTransferController {
             );
             
             if (message == null) {
-                System.err.println("❌ Failed to save file message (duplicate or error)");
+                System.err.println("❌ Failed to save file message");
                 notifyError(fileId, "Failed to save message to database");
                 return;
             }
             
-            // 4. Create file attachment metadata
+            // 5. Create file attachment metadata (UPLOADING status)
             FileAttachment attachment = new FileAttachment();
             attachment.setMessage(message);
             attachment.setSender(chatService.getUserById(currentUserId));
@@ -162,18 +175,29 @@ public class FileTransferController {
             attachment.setFilePath(storagePath.toString());
             attachment.setFileSize(file.length());
             attachment.setMimeType(detectMimeType(file));
+            attachment.setStatus(FileStatus.UPLOADING);
+            attachment.setChecksum(checksum);
             
-            fileAttachmentDao.save(attachment);
+            FileAttachment savedAttachment = fileAttachmentDao.save(attachment);
             
-            // 5. Track transfer context
+            if (savedAttachment == null) {
+                System.err.println("❌ Failed to save file attachment");
+                notifyError(fileId, "Failed to save file metadata");
+                return;
+            }
+            
+            // 6. Track transfer context
             FileTransferContext context = new FileTransferContext(
                 fileId, conversationId, currentUserId, toUserId,
                 file.getName(), file.length(), clientMessageId, true
             );
             context.sourceFile = storagePath.toFile();
+            context.checksum = checksum;
+            context.messageId = message.getId();
+            context.fileAttachmentId = savedAttachment.getId();
             pendingTransfers.put(fileId, context);
             
-            // 6. Send file via P2P (trực tiếp, không cần request/accept)
+            // 7. Send file via P2P (trực tiếp, không cần request/accept)
             String p2pFileId = p2pManager.sendFile(
                 toUserId, 
                 storagePath.toFile(), 
@@ -181,9 +205,12 @@ public class FileTransferController {
                 clientMessageId
             );
             
-            System.out.println("✅ File send initiated: " + fileId);
+            System.out.println("✅ File send initiated:");
+            System.out.println("   - FileId: " + fileId);
             System.out.println("   - Message ID: " + message.getId());
+            System.out.println("   - Attachment ID: " + savedAttachment.getId());
             System.out.println("   - Storage path: " + storagePath);
+            System.out.println("   - Checksum: " + checksum);
             System.out.println("   - ClientMessageId: " + clientMessageId);
             
         } catch (Exception e) {
@@ -197,9 +224,17 @@ public class FileTransferController {
      */
     public void cancelTransfer(String fileId, Integer toUserId) {
         try {
+            FileTransferContext context = pendingTransfers.get(fileId);
+            
+            // Update status to CANCELED
+            if (context != null && context.fileAttachmentId != null) {
+                fileAttachmentDao.updateStatus(context.fileAttachmentId, FileStatus.CANCELED);
+            }
+            
             p2pManager.cancelFileTransfer(fileId, toUserId);
             pendingTransfers.remove(fileId);
             System.out.println("🚫 File transfer canceled: " + fileId);
+            
         } catch (Exception e) {
             notifyError(fileId, "Failed to cancel transfer: " + e.getMessage());
         }
@@ -241,6 +276,57 @@ public class FileTransferController {
         }
     }
 
+    // ===== CHECKSUM CALCULATION =====
+    
+    /**
+     * Calculate SHA-256 checksum of file
+     */
+    private String calculateChecksum(File file) throws Exception {
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        
+        try (FileInputStream fis = new FileInputStream(file)) {
+            byte[] buffer = new byte[8192];
+            int bytesRead;
+            
+            while ((bytesRead = fis.read(buffer)) != -1) {
+                digest.update(buffer, 0, bytesRead);
+            }
+        }
+        
+        byte[] hashBytes = digest.digest();
+        
+        // Convert to hex string
+        StringBuilder sb = new StringBuilder();
+        for (byte b : hashBytes) {
+            sb.append(String.format("%02x", b));
+        }
+        
+        return sb.toString();
+    }
+    
+    /**
+     * Verify file checksum
+     */
+    private boolean verifyChecksum(File file, String expectedChecksum) {
+        try {
+            String actualChecksum = calculateChecksum(file);
+            boolean matches = actualChecksum.equals(expectedChecksum);
+            
+            if (matches) {
+                System.out.println("✅ Checksum verified: " + actualChecksum);
+            } else {
+                System.err.println("❌ Checksum mismatch!");
+                System.err.println("   Expected: " + expectedChecksum);
+                System.err.println("   Actual:   " + actualChecksum);
+            }
+            
+            return matches;
+        } catch (Exception e) {
+            System.err.println("❌ Checksum verification failed: " + e.getMessage());
+            return false;
+        }
+    }
+
     // ===== HELPER METHODS =====
     
     private String formatFileSize(Long bytes) {
@@ -274,14 +360,15 @@ public class FileTransferController {
         return "application/octet-stream";
     }
 
-    // ===== PUBLIC METHODS FOR P2P EVENTS (called from P2PManager via ChatController) =====
+    // ===== PUBLIC METHODS FOR P2P EVENTS =====
     
     /**
-     * Called when file chunk is received (first chunk contains metadata)
+     * Called when file chunk is received (first chunk contains metadata + checksum)
      */
     public void handleFileChunk(Integer fromUserId, String fileId, int chunkIndex, 
                                byte[] chunkData, int totalChunks, String fileName, 
-                               Long fileSize, Integer conversationId, String clientMessageId) {
+                               Long fileSize, Integer conversationId, String clientMessageId,
+                               String expectedChecksum) {
         try {
             FileTransferContext context = pendingTransfers.get(fileId);
             
@@ -291,11 +378,13 @@ public class FileTransferController {
                     fileId, conversationId, fromUserId, currentUserId,
                     fileName, fileSize, clientMessageId, false
                 );
+                context.checksum = expectedChecksum; // Store expected checksum
                 pendingTransfers.put(fileId, context);
                 
                 System.out.println("📥 Receiving file: " + fileName);
                 System.out.println("   - FileId: " + fileId);
                 System.out.println("   - Size: " + formatFileSize(fileSize));
+                System.out.println("   - Expected Checksum: " + expectedChecksum);
                 System.out.println("   - ClientMessageId: " + clientMessageId);
             }
             
@@ -339,13 +428,31 @@ public class FileTransferController {
         }
         
         if (!context.isUpload) {
-            // RECEIVER: Save file message to DB với idempotent
+            // ===== RECEIVER: Verify and save =====
             try {
                 String tempFileName = fileId + "_" + context.fileName;
                 Path tempPath = Paths.get(DOWNLOAD_DIR, tempFileName);
                 
                 if (!Files.exists(tempPath)) {
                     throw new IOException("File not found: " + tempPath);
+                }
+                
+                // Calculate checksum of received file
+                String receivedChecksum = calculateChecksum(tempPath.toFile());
+                
+                // Verify checksum if provided
+                boolean checksumValid = true;
+                if (context.checksum != null && !context.checksum.isEmpty()) {
+                    checksumValid = verifyChecksum(tempPath.toFile(), context.checksum);
+                    
+                    if (!checksumValid) {
+                        throw new IOException("Checksum verification failed! File may be corrupted.");
+                    }
+                }
+                
+                System.out.println("✅ File received, checksum: " + receivedChecksum);
+                if (checksumValid) {
+                    System.out.println("✅ Checksum verified successfully");
                 }
                 
                 // Create message với idempotent
@@ -359,7 +466,7 @@ public class FileTransferController {
                 );
                 
                 if (message != null) {
-                    // Create file attachment metadata
+                    // Create file attachment metadata (COMPLETED status)
                     FileAttachment attachment = new FileAttachment();
                     attachment.setMessage(message);
                     attachment.setSender(chatService.getUserById(context.senderId));
@@ -368,13 +475,21 @@ public class FileTransferController {
                     attachment.setFilePath(tempPath.toString());
                     attachment.setFileSize(context.fileSize);
                     attachment.setMimeType(detectMimeType(tempPath.toFile()));
+                    attachment.setStatus(FileStatus.COMPLETED);
+                    attachment.setChecksum(receivedChecksum);
                     
                     fileAttachmentDao.save(attachment);
+                    
+                    // Update message status to SENT
+                    dao.MessageDao messageDao = new dao.MessageDao();
+                    messageDao.updateMessageStatusByClientId(context.clientMessageId, 
+                        model.Message.MessageStatus.SENT);
                     
                     System.out.println("✅ File received and saved:");
                     System.out.println("   - File ID: " + fileId);
                     System.out.println("   - Message ID: " + message.getId());
                     System.out.println("   - Storage path: " + tempPath);
+                    System.out.println("   - Checksum: " + receivedChecksum);
                 } else {
                     System.out.println("⚠️ Message already exists (idempotent): " + context.clientMessageId);
                 }
@@ -384,11 +499,40 @@ public class FileTransferController {
             } catch (Exception e) {
                 System.err.println("❌ Error saving received file: " + e.getMessage());
                 e.printStackTrace();
+                
+                // Update status to FAILED
+                FileAttachment existing = fileAttachmentDao.findByFileId(fileId);
+                if (existing != null) {
+                    fileAttachmentDao.updateStatus(existing.getId(), FileStatus.FAILED);
+                }
+                
                 notifyError(fileId, "Failed to save file: " + e.getMessage());
             }
         } else {
-            // SENDER: File sent successfully
-            notifyComplete(fileId, context.sourceFile, true);
+            // ===== SENDER: Update status to COMPLETED =====
+            try {
+                // Update file attachment status
+                fileAttachmentDao.updateStatus(context.fileAttachmentId, FileStatus.COMPLETED);
+                
+                // Update message status
+                dao.MessageDao messageDao = new dao.MessageDao();
+                messageDao.updateMessageStatus(context.messageId, model.Message.MessageStatus.SENT);
+                
+                System.out.println("✅ File sent successfully:");
+                System.out.println("   - File ID: " + fileId);
+                System.out.println("   - Message ID: " + context.messageId);
+                System.out.println("   - Attachment ID: " + context.fileAttachmentId);
+                
+                notifyComplete(fileId, context.sourceFile, true);
+                
+            } catch (Exception e) {
+                System.err.println("❌ Error updating file status: " + e.getMessage());
+                e.printStackTrace();
+                
+                // Update status to FAILED
+                fileAttachmentDao.updateStatus(context.fileAttachmentId, FileStatus.FAILED);
+                notifyError(fileId, "Failed to update status: " + e.getMessage());
+            }
         }
         
         pendingTransfers.remove(fileId);
@@ -397,16 +541,23 @@ public class FileTransferController {
     public void handleFileCanceled(String fileId, boolean isUpload) {
         FileTransferContext context = pendingTransfers.remove(fileId);
         
-        if (!isUpload && context != null) {
-            // Clean up incomplete download
-            try {
-                String tempFileName = fileId + "_" + context.fileName;
-                Path tempPath = Paths.get(DOWNLOAD_DIR, tempFileName);
-                if (Files.exists(tempPath)) {
-                    Files.delete(tempPath);
+        if (context != null) {
+            // Update status to CANCELED
+            if (context.fileAttachmentId != null) {
+                fileAttachmentDao.updateStatus(context.fileAttachmentId, FileStatus.CANCELED);
+            }
+            
+            if (!isUpload) {
+                // Clean up incomplete download
+                try {
+                    String tempFileName = fileId + "_" + context.fileName;
+                    Path tempPath = Paths.get(DOWNLOAD_DIR, tempFileName);
+                    if (Files.exists(tempPath)) {
+                        Files.delete(tempPath);
+                    }
+                } catch (IOException e) {
+                    System.err.println("⚠️ Error cleaning up canceled file: " + e.getMessage());
                 }
-            } catch (IOException e) {
-                System.err.println("⚠️ Error cleaning up canceled file: " + e.getMessage());
             }
         }
         
@@ -418,7 +569,19 @@ public class FileTransferController {
     }
 
     public void handleFileError(String fileId, String error) {
-        pendingTransfers.remove(fileId);
+        FileTransferContext context = pendingTransfers.remove(fileId);
+        
+        if (context != null && context.fileAttachmentId != null) {
+            // Update status to FAILED
+            fileAttachmentDao.updateStatus(context.fileAttachmentId, FileStatus.FAILED);
+            
+            // Update message status to FAILED
+            if (context.messageId != null) {
+                dao.MessageDao messageDao = new dao.MessageDao();
+                messageDao.updateMessageStatus(context.messageId, model.Message.MessageStatus.FAILED);
+            }
+        }
+        
         notifyError(fileId, error);
     }
 
@@ -443,6 +606,13 @@ public class FileTransferController {
      */
     public Long getUserStorageUsage(Integer userId) {
         return fileAttachmentDao.getTotalSizeByUser(userId);
+    }
+    
+    /**
+     * Get uploading files for retry
+     */
+    public java.util.List<FileAttachment> getUploadingFiles() {
+        return fileAttachmentDao.getUploadingFiles(currentUserId);
     }
 
     // ===== CLEANUP =====

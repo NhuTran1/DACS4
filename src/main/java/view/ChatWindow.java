@@ -755,30 +755,44 @@ public class ChatWindow {
     	        public void onFileComplete(String fileId, File file, boolean isUpload) {
     	            Platform.runLater(() -> {
     	                closeFileProgressDialog(fileId);
-    	                
+
     	                if (isUpload) {
-    	                    // File sent successfully
     	                    showSuccessNotification("File sent successfully!");
-    	                } else {
-    	                    // File received - save to database and display
-    	                    if (currentConversation != null) {
-    	                        String fileUrl = "file://" + file.getName() + "|" + formatFileSize(file.length());
-    	                        Message fileMsg = chatService.sendMessage(
-    	                            currentConversation.getId(),
-    	                            currentChatUser.getId(), // From sender
-    	                            "[File] " + file.getName(),
-    	                            fileUrl
-    	                        );
-    	                        
-    	                        if (fileMsg != null) {
-    	                            displayMessage(fileMsg, false);
-    	                        }
-    	                    }
-    	                    
-    	                    showSuccessNotification("File received: " + file.getName());
+    	                    return;
     	                }
+
+    	                // ⛔ FIX CỐT LÕI
+    	                if (file == null) {
+    	                    showAlert("Error", "File received but file object is null");
+    	                    System.err.println("❌ onFileComplete: file is null, fileId=" + fileId);
+    	                    return;
+    	                }
+
+    	                if (!file.exists()) {
+    	                    showAlert("Error", "Received file not found on disk");
+    	                    return;
+    	                }
+
+    	                if (currentConversation != null) {
+    	                    String fileUrl = "file://" + file.getName() + "|" +
+    	                                     formatFileSize(file.length());
+
+    	                    Message fileMsg = chatService.sendMessage(
+    	                        currentConversation.getId(),
+    	                        currentChatUser.getId(),
+    	                        "[File] " + file.getName(),
+    	                        fileUrl
+    	                    );
+
+    	                    if (fileMsg != null) {
+    	                        displayMessage(fileMsg, false);
+    	                    }
+    	                }
+
+    	                showSuccessNotification("File received: " + file.getName());
     	            });
     	        }
+
 
     	        @Override
     	        public void onFileCanceled(String fileId, boolean isUpload) {

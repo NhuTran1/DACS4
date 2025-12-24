@@ -2,19 +2,19 @@ package dao;
 
 import java.util.List;
 
-import org.hibernate.Hibernate;
 import org.hibernate.Session;
 import org.hibernate.Transaction;
 import org.hibernate.query.Query;
 
 import config.HibernateUtil;
 import model.Message;
+import model.Message.MessageStatus;
 import model.MessageSeen;
 import model.Users;
 
 public class MessageDao {
 
-	/**
+    /**
      * Tìm message theo clientMessageId (để kiểm tra idempotent)
      */
     public Message findByClientMessageId(String clientMessageId) {
@@ -42,8 +42,7 @@ public class MessageDao {
     }
     
     /**
-     * Lưu tin nhắn mới với clientMessageId (idempotent)
-     * Trả về message đã lưu hoặc message đã tồn tại
+     * Lưu tin nhắn mới với clientMessageId và status (idempotent)
      */
     public Message saveMessageIdempotent(Message message) {
         if (message.getClientMessageId() == null || message.getClientMessageId().isEmpty()) {
@@ -59,20 +58,142 @@ public class MessageDao {
             if (existing != null) {
                 System.out.println("⚠️ Message already exists (idempotent): " + message.getClientMessageId());
                 tx.rollback();
-                return existing; // Trả về message đã tồn tại
+                return existing;
+            }
+            
+            // Set default status if not set
+            if (message.getStatus() == null) {
+                message.setStatus(MessageStatus.PENDING);
             }
             
             // Lưu message mới
             session.save(message);
             tx.commit();
             
-            System.out.println("✅ New message saved: " + message.getClientMessageId());
+            System.out.println("✅ New message saved: " + message.getClientMessageId() + 
+                             " (Status: " + message.getStatus() + ")");
             return message;
             
         } catch (Exception e) {
             if (tx != null) tx.rollback();
             e.printStackTrace();
             return null;
+        }
+    }
+    
+    /**
+     * Update message status
+     */
+    public boolean updateMessageStatus(Integer messageId, MessageStatus newStatus) {
+        Transaction tx = null;
+        try (Session session = HibernateUtil.getSessionFactory().openSession()) {
+            tx = session.beginTransaction();
+            
+            Message message = session.get(Message.class, messageId);
+            if (message != null) {
+                message.setStatus(newStatus);
+                session.update(message);
+                tx.commit();
+                
+                System.out.println("✅ Message " + messageId + " status updated to: " + newStatus);
+                return true;
+            }
+            
+            tx.rollback();
+            return false;
+        } catch (Exception e) {
+            if (tx != null) tx.rollback();
+            e.printStackTrace();
+            return false;
+        }
+    }
+    
+    /**
+     * Update message status by clientMessageId
+     */
+    public boolean updateMessageStatusByClientId(String clientMessageId, MessageStatus newStatus) {
+        Message message = findByClientMessageId(clientMessageId);
+        if (message != null) {
+            return updateMessageStatus(message.getId(), newStatus);
+        }
+        return false;
+    }
+    
+    /**
+     * Increment retry count
+     */
+    public boolean incrementRetryCount(Integer messageId) {
+        Transaction tx = null;
+        try (Session session = HibernateUtil.getSessionFactory().openSession()) {
+            tx = session.beginTransaction();
+            
+            String sql = """
+                UPDATE message
+                SET retry_count = retry_count + 1,
+                    last_retry_at = NOW()
+                WHERE id = :msgId
+                """;
+            
+            Query<?> query = session.createNativeQuery(sql);
+            query.setParameter("msgId", messageId);
+            
+            int rows = query.executeUpdate();
+            tx.commit();
+            
+            return rows > 0;
+        } catch (Exception e) {
+            if (tx != null) tx.rollback();
+            e.printStackTrace();
+            return false;
+        }
+    }
+    
+    /**
+     * Get all pending messages for retry
+     */
+    public List<Message> getPendingMessages(Integer userId) {
+        try (Session session = HibernateUtil.getSessionFactory().openSession()) {
+            String sql = """
+                SELECT *
+                FROM message
+                WHERE sender_id = :uid
+                  AND status = 'PENDING'
+                  AND retry_count < 3
+                ORDER BY created_at ASC
+                """;
+            
+            Query<Message> query = session.createNativeQuery(sql, Message.class);
+            query.setParameter("uid", userId);
+            
+            return query.getResultList();
+        } catch (Exception e) {
+            e.printStackTrace();
+            return List.of();
+        }
+    }
+    
+    /**
+     * Get failed messages that can be retried
+     */
+    public List<Message> getRetryableFailedMessages(Integer userId) {
+        try (Session session = HibernateUtil.getSessionFactory().openSession()) {
+            String sql = """
+                SELECT *
+                FROM message
+                WHERE sender_id = :uid
+                  AND status = 'FAILED'
+                  AND retry_count < 3
+                ORDER BY created_at ASC
+                LIMIT 10
+                """;
+            
+            Query<Message> query = session.createNativeQuery(sql, Message.class);
+            query.setParameter("uid", userId);
+            
+            return query.getResultList();
+        } catch (Exception e) {
+            e.printStackTrace();
+            return List.of();
         }
     }
     
@@ -130,7 +251,7 @@ public class MessageDao {
 	            seen.setMessage(session.get(Message.class, messageId));
 	            seen.setUser(session.get(Users.class, from));
 
-	            session.save(seen); // Lưu đúng chỗ
+	            session.save(seen);
 	        }
 
 	        tx.commit();
