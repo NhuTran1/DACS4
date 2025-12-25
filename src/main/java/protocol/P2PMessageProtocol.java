@@ -23,6 +23,8 @@ public class P2PMessageProtocol {
         FILE_CHUNK,        // Chunk của file
         FILE_COMPLETE,     // File đã gửi xong
         FILE_CANCEL,       // Hủy việc gửi file
+        FILE_ACK,        // ✅ NEW: ACK từ receiver
+        FILE_NACK,       // ✅ NEW: NACK từ receiver (failed)
         
         // Audio/Voice call
         AUDIO_REQUEST,     // Yêu cầu bắt đầu voice call
@@ -145,6 +147,31 @@ public class P2PMessageProtocol {
         msg.from = from;
         msg.to = to;
         msg.data.put("fileId", fileId);
+        return gson.toJson(msg);
+    }
+    
+    /**
+     * ✅ Build FILE_ACK - xác nhận đã nhận file thành công
+     */
+    public static String buildFileAck(Integer from, Integer to, String fileId) {
+        Message msg = new Message();
+        msg.type = MessageType.FILE_ACK.name();
+        msg.from = from;
+        msg.to = to;
+        msg.data.put("fileId", fileId);
+        return gson.toJson(msg);
+    }
+
+    /**
+     * ✅ Build FILE_NACK - báo lỗi khi nhận file
+     */
+    public static String buildFileNack(Integer from, Integer to, String fileId, String reason) {
+        Message msg = new Message();
+        msg.type = MessageType.FILE_NACK.name();
+        msg.from = from;
+        msg.to = to;
+        msg.data.put("fileId", fileId);
+        msg.data.put("reason", reason);
         return gson.toJson(msg);
     }
 

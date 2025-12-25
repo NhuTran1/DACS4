@@ -247,6 +247,8 @@ public class P2PManager implements PeerConnection.P2PMessageHandler {
                 case FILE_CHUNK -> handleFileChunk(msg);
                 case FILE_COMPLETE -> handleFileComplete(msg);
                 case FILE_CANCEL -> handleFileCancel(msg);
+                case FILE_ACK -> handleFileAck(msg);      // ✅ NEW
+                case FILE_NACK -> handleFileNack(msg);    // ✅ NEW
                 
                 // Audio call
                 case AUDIO_REQUEST -> audioCallManager.handleCallRequest(msg);
@@ -442,6 +444,32 @@ public class P2PManager implements PeerConnection.P2PMessageHandler {
                     eventListener.onFileError(fileId, error);
                 }
             }
+            
+            /**
+             * ✅ Handle FILE_ACK from receiver
+             */
+            private void handleFileAck(P2PMessageProtocol.Message msg) {
+                String fileId = (String) msg.data.get("fileId");
+                
+                if (eventListener != null) {
+                    // Forward to FileTransferController
+                    ((ChatController) eventListener).getFileTransferController().handleFileAck(fileId);
+                }
+            }
+
+            /**
+             * ✅ Handle FILE_NACK from receiver
+             */
+            private void handleFileNack(P2PMessageProtocol.Message msg) {
+                String fileId = (String) msg.data.get("fileId");
+                String reason = (String) msg.data.get("reason");
+                
+                if (eventListener != null) {
+                    // Forward to FileTransferController
+                    ((ChatController) eventListener).getFileTransferController().handleFileNack(fileId, reason);
+                }
+            }
+            
         });
     }
 
@@ -488,6 +516,8 @@ public class P2PManager implements PeerConnection.P2PMessageHandler {
                     //eventListener.onAudioCallError(callId, error);
                 }
             }
+            
+            
         });
     }
 
