@@ -490,6 +490,10 @@ public class FileTransferController {
                     System.out.println("   - Message ID: " + message.getId());
                     System.out.println("   - Storage path: " + tempPath);
                     System.out.println("   - Checksum: " + receivedChecksum);
+                    
+                 // ✅ Send FILE_ACK back to sender
+                    sendFileAck(fileId, context.senderId);
+                    
                 } else {
                     System.out.println("⚠️ Message already exists (idempotent): " + context.clientMessageId);
                 }
@@ -497,17 +501,20 @@ public class FileTransferController {
                 notifyComplete(fileId, tempPath.toFile(), false);
                 
             } catch (Exception e) {
-                System.err.println("❌ Error saving received file: " + e.getMessage());
-                e.printStackTrace();
-                
-                // Update status to FAILED
-                FileAttachment existing = fileAttachmentDao.findByFileId(fileId);
-                if (existing != null) {
-                    fileAttachmentDao.updateStatus(existing.getId(), FileStatus.FAILED);
-                }
-                
-                notifyError(fileId, "Failed to save file: " + e.getMessage());
-            }
+            	 System.err.println("❌ Error saving received file: " + e.getMessage());
+                 e.printStackTrace();
+                 
+                 // Update status to FAILED
+                 FileAttachment existing = fileAttachmentDao.findByFileId(fileId);
+                 if (existing != null) {
+                     fileAttachmentDao.updateStatus(existing.getId(), FileStatus.FAILED);
+                 }
+                 
+                 // ✅ Send FILE_NACK back to sender
+                 sendFileNack(fileId, context.senderId, e.getMessage());
+                 
+                 notifyError(fileId, "Failed to save file: " + e.getMessage());
+             }
         } else {
             // ===== SENDER: Update status to COMPLETED =====
             try {
@@ -584,6 +591,50 @@ public class FileTransferController {
         
         notifyError(fileId, error);
     }
+    
+    /**
+     * ✅ Send FILE_ACK to sender
+     */
+    private void sendFileAck(String fileId, Integer toUserId) {
+        try {
+            String ackJson = protocol.P2PMessageProtocol.buildFileAck(
+                currentUserId,
+                toUserId,
+                fileId
+            );
+            
+            network.p2p.PeerConnection conn = p2pManager.getConnection(toUserId);
+            if (conn != null && conn.isTcpConnected()) {
+                conn.sendTcp(ackJson);
+                System.out.println("✅ Sent FILE_ACK for: " + fileId);
+            }
+        } catch (Exception e) {
+            System.err.println("❌ Failed to send FILE_ACK: " + e.getMessage());
+        }
+    }
+    
+    /**
+     * ✅ Send FILE_NACK to sender
+     */
+    private void sendFileNack(String fileId, Integer toUserId, String reason) {
+        try {
+            String nackJson = protocol.P2PMessageProtocol.buildFileNack(
+                currentUserId,
+                toUserId,
+                fileId,
+                reason
+            );
+            
+            network.p2p.PeerConnection conn = p2pManager.getConnection(toUserId);
+            if (conn != null && conn.isTcpConnected()) {
+                conn.sendTcp(nackJson);
+                System.out.println("✅ Sent FILE_NACK for: " + fileId);
+            }
+        } catch (Exception e) {
+            System.err.println("❌ Failed to send FILE_NACK: " + e.getMessage());
+        }
+    }
+    
 
     // ===== PUBLIC QUERIES =====
     

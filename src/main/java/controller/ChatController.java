@@ -5,6 +5,7 @@ import model.Message;
 import model.Users;
 import service.ChatService;
 import network.p2p.P2PManager;
+import network.p2p.PeerConnection;
 import network.p2p.PeerInfo;
 import network.p2p.PeerDiscoveryService;
 
@@ -273,10 +274,26 @@ public class ChatController {
             Message message = chatService.getMessageById(messageId);
             if (message == null) return;
 
+            // Only mark if not the sender
+            if (message.getSender().getId().equals(currentUserId)) {
+                return;
+            }
+
             chatService.markMessageSeen(messageId, currentUserId);
 
-            // TODO: Send seen notification via P2P
-            System.out.println("✅ Marked message " + messageId + " as seen");
+            // ✅ Send MESSAGE_SEEN request to sender via P2P
+            // Sender sẽ nhận và reply MESSAGE_SEEN_ACK
+            String seenJson = protocol.P2PMessageProtocol.buildMessageSeen(
+                currentUserId,
+                message.getConversation().getId(),
+                messageId
+            );
+            
+            PeerConnection conn = p2pManager.getConnection(message.getSender().getId());
+            if (conn != null && conn.isTcpConnected()) {
+                conn.sendTcp(seenJson);
+                System.out.println("✅ Sent MESSAGE_SEEN request for message: " + messageId);
+            }
 
         } catch (Exception e) {
             System.err.println("❌ Error marking message as seen: " + e.getMessage());

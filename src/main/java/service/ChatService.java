@@ -7,6 +7,7 @@ import model.Conversation;
 import model.FriendRequest;
 import model.Message;
 import model.Users;
+import protocol.P2PMessageProtocol;
 
 /**
  * ChatService - Facade pattern
@@ -86,8 +87,6 @@ public class ChatService {
         return conversationService.updateConversationName(conversationId, newName, requestUserId);
     }
     
-    // ===== MESSAGE SERVICE - IDEMPOTENT METHODS =====
-    
     /**
      * Gửi tin nhắn với clientMessageId (Idempotent)
      * Đây là method chính để gửi tin nhắn
@@ -143,6 +142,8 @@ public class ChatService {
         return messageService.sendMessageWithType(conversationId, senderId, content, imageUrl, type);
     }
     
+    
+    
     /**
      * Gửi file message (legacy)
      */
@@ -194,5 +195,13 @@ public class ChatService {
     
     public MessageService.MessageStats getMessageStats(Integer conversationId) {
         return messageService.getMessageStats(conversationId);
+    }
+    
+    public void markMessageSentByClientId(String clientMessageId) {
+    	messageService.markMessageSentByClientId(clientMessageId);
+    }
+    
+    public void handleMessageNack(P2PMessageProtocol.Message msg) {
+    	messageService.handleMessageNack(msg);
     }
 }

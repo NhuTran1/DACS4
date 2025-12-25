@@ -668,6 +668,11 @@ public class ChatWindow {
             for (Message msg : messages) {
                 boolean isOwn = msg.getSender().getId().equals(currentUserId);
                 displayMessage(msg, isOwn);
+                
+                // ✅ Auto mark as seen if not own message
+                if (!isOwn && msg.getStatus() != Message.MessageStatus.DELIVERED) {
+                    chatController.markMessageAsSeen(msg.getId());
+                }
             }
         }
     }

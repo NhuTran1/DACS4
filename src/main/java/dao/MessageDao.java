@@ -9,6 +9,7 @@ import org.hibernate.query.Query;
 import config.HibernateUtil;
 import model.Message;
 import model.Message.MessageStatus;
+import protocol.P2PMessageProtocol;
 import model.MessageSeen;
 import model.Users;
 

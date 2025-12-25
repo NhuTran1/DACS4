@@ -243,6 +243,9 @@ public class P2PManager implements PeerConnection.P2PMessageHandler {
                 case TYPING_START -> handleTypingStart(msg);
                 case TYPING_STOP -> handleTypingStop(msg);
                 
+                case MESSAGE_ACK -> handleMessageAck(msg);
+                case MESSAGE_SEEN_ACK -> handleMessageSeenAck(msg);
+                
                 // File transfer - simplified
                 case FILE_CHUNK -> handleFileChunk(msg);
                 case FILE_COMPLETE -> handleFileComplete(msg);
@@ -298,9 +301,48 @@ public class P2PManager implements PeerConnection.P2PMessageHandler {
             clientMessageId != null ? clientMessageId : UUID.randomUUID().toString()
         );
 
-        // Gọi callback UI để cập nhật giao diện 
         if (savedMsg != null) {
+            // ✅ gửi ACK về sender
+            PeerConnection conn = getOrCreateConnection(msg.from);
+            if (conn != null) {
+                String ack = P2PMessageProtocol.buildMessageAck(
+                    localUserId,
+                    msg.from,
+                    clientMessageId
+                );
+                conn.sendTcp(ack);
+            }
+
             eventListener.onChatMessageReceived(msg.conversationId, savedMsg);
+        }
+    }
+    
+    private void handleMessageAck(P2PMessageProtocol.Message msg) {
+        String clientMessageId = (String) msg.data.get("clientMessageId");
+        if (clientMessageId != null) {
+            chatService.markMessageSentByClientId(clientMessageId);
+        }
+    }
+
+
+    private void handleMessageNack(P2PMessageProtocol.Message msg) {
+        String clientMessageId = (String) msg.data.get("clientMessageId");
+
+        if (clientMessageId != null) {
+            chatService.markMessageFailedByClientId(clientMessageId);
+        }
+    }
+
+    
+    private void handleMessageSeenAck(P2PMessageProtocol.Message msg) {
+        Number messageId = (Number) msg.data.get("messageId");
+        Integer fromUser = msg.from;
+
+        if (messageId != null && fromUser != null) {
+            chatService.confirmMessageSeenAck(
+                messageId.intValue(),
+                fromUser
+            );
         }
     }
 
@@ -451,9 +493,10 @@ public class P2PManager implements PeerConnection.P2PMessageHandler {
             private void handleFileAck(P2PMessageProtocol.Message msg) {
                 String fileId = (String) msg.data.get("fileId");
                 
-                if (eventListener != null) {
-                    // Forward to FileTransferController
-                    ((ChatController) eventListener).getFileTransferController().handleFileAck(fileId);
+                if (fileId != null) {
+                    System.out.println("✅ Received FILE_ACK for: " + fileId);
+                    // File transfer manager will handle completion
+                    fileTransferManager.handleFileComplete(fileId);
                 }
             }
 
@@ -464,9 +507,12 @@ public class P2PManager implements PeerConnection.P2PMessageHandler {
                 String fileId = (String) msg.data.get("fileId");
                 String reason = (String) msg.data.get("reason");
                 
-                if (eventListener != null) {
-                    // Forward to FileTransferController
-                    ((ChatController) eventListener).getFileTransferController().handleFileNack(fileId, reason);
+                if (fileId != null) {
+                    System.err.println("❌ Received FILE_NACK for: " + fileId + ", reason: " + reason);
+                    
+                    if (eventListener != null) {
+                        eventListener.onFileError(fileId, reason);
+                    }
                 }
             }
             

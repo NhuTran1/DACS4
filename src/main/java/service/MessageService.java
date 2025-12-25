@@ -10,6 +10,8 @@ import dao.UserDao;
 import model.Conversation;
 import model.Message;
 import model.Users;
+import model.Message.MessageStatus;
+import protocol.P2PMessageProtocol;
 
 public class MessageService {
 
@@ -108,6 +110,21 @@ public class MessageService {
         return sendMessageIdempotent(conversationId, senderId, content, imageUrl, 
                                      type, clientMessageId);
     }
+    
+    public void markMessageSentByClientId(String clientMessageId) {
+        messageDao.updateMessageStatusByClientId(
+            clientMessageId,
+            MessageStatus.SENT
+        );
+    }
+    
+    public void handleMessageNack(P2PMessageProtocol.Message msg) {
+		String clientMessageId = (String) msg.data.get("clientMessageId");
+        messageDao.updateMessageStatusByClientId(
+            clientMessageId,
+            MessageStatus.FAILED
+        );
+	}
 
     // ===== FILE MESSAGE METHODS =====
     

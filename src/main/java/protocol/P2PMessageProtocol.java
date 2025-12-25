@@ -19,6 +19,9 @@ public class P2PMessageProtocol {
         TYPING_START,      // Bắt đầu typing
         TYPING_STOP,       // Dừng typing
         
+        MESSAGE_ACK,       
+        MESSAGE_SEEN_ACK,
+        
         // File transfer - Simplified (no request/accept/reject)
         FILE_CHUNK,        // Chunk của file
         FILE_COMPLETE,     // File đã gửi xong
@@ -74,6 +77,15 @@ public class P2PMessageProtocol {
         return gson.toJson(msg);
     }
     
+    public static String buildMessageAck(Integer from, Integer to, String clientMessageId) {
+        Message msg = new Message();
+        msg.type = MessageType.MESSAGE_ACK.name();
+        msg.from = from;
+        msg.to = to;
+        msg.data.put("clientMessageId", clientMessageId);
+        return gson.toJson(msg);
+    }
+    
     /**
      * Legacy wrapper (không có clientMessageId)
      */
@@ -102,29 +114,40 @@ public class P2PMessageProtocol {
     /**
      * Gửi chunk của file với metadata trong chunk đầu tiên
      */
-    public static String buildFileChunk(Integer from, Integer to, String fileId, 
-                                       int chunkIndex, byte[] chunkData, int totalChunks,
-                                       String fileName, Long fileSize, Integer conversationId,
-                                       String clientMessageId) {
+    public static String buildFileChunk(
+            Integer from,
+            Integer to,
+            String fileId,
+            int chunkIndex,
+            byte[] chunkData,
+            int totalChunks,
+            String fileName,
+            long fileSize,
+            Integer conversationId,
+            String clientMessageId
+    ) {
         Message msg = new Message();
         msg.type = MessageType.FILE_CHUNK.name();
         msg.from = from;
         msg.to = to;
+
         msg.data.put("fileId", fileId);
         msg.data.put("chunkIndex", chunkIndex);
         msg.data.put("totalChunks", totalChunks);
-        msg.data.put("chunkData", Base64.getEncoder().encodeToString(chunkData));
-        
-        // Metadata chỉ gửi trong chunk đầu tiên
+        msg.data.put("chunkData",
+                Base64.getEncoder().encodeToString(chunkData));
+
+        // ✅ Metadata chỉ gửi ở chunk đầu
         if (chunkIndex == 0) {
             msg.data.put("fileName", fileName);
             msg.data.put("fileSize", fileSize);
             msg.data.put("conversationId", conversationId);
             msg.data.put("clientMessageId", clientMessageId);
         }
-        
+
         return gson.toJson(msg);
     }
+
 
     /**
      * File đã gửi xong
