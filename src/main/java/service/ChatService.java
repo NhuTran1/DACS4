@@ -213,4 +213,9 @@ public class ChatService {
         messageService.confirmMessageSeenAck(messageId, viewerId);
     }
     
+    public Message findByClientMessageId(String clientMessageId) {
+        return messageService.findByClientMessageId(clientMessageId);
+    }
+
+    
 }

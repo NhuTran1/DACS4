@@ -89,6 +89,7 @@ public class FileTransferController {
         boolean isUpload;
         Integer messageId;
         Integer fileAttachmentId;
+        volatile boolean completed = false;
         
         FileTransferContext(String fileId, Integer conversationId, Integer senderId, 
                           Integer receiverId, String fileName, Long fileSize, 
@@ -425,8 +426,17 @@ public class FileTransferController {
         FileTransferContext context = pendingTransfers.get(fileId);
         
         if (context == null) {
-            System.err.println("❌ Unknown file transfer: " + fileId);
+            System.err.println("⚠️ FILE_COMPLETE but context missing: " + fileId);
             return;
+        }
+        
+     // ✅ GUARD: chỉ cho chạy 1 lần
+        synchronized (context) {
+            if (context.completed) {
+                System.out.println("⚠️ FILE_COMPLETE already handled: " + fileId);
+                return;
+            }
+            context.completed = true;
         }
         
         if (!context.isUpload) {
@@ -442,7 +452,7 @@ public class FileTransferController {
                 // Calculate checksum of received file
                 String receivedChecksum = calculateChecksum(tempPath.toFile());
                 
-                // Verify checksum if provided
+                //1. Verify checksum if provided
                 boolean checksumValid = true;
                 if (context.checksum != null && !context.checksum.isEmpty()) {
                     checksumValid = verifyChecksum(tempPath.toFile(), context.checksum);
@@ -466,50 +476,18 @@ public class FileTransferController {
                 
                 // Create message với idempotent
                 String fileUrl = "file://" + context.fileName + "|" + formatFileSize(context.fileSize);
-                Message message = chatService.sendFileMessageIdempotent(
-                    context.conversationId,
-                    context.senderId,
-                    context.fileName,
-                    fileUrl,
-                    context.clientMessageId
-                );
+
                 
-//                
-//                if (message != null) {
-//                    // Create file attachment metadata (COMPLETED status)
-//                    FileAttachment attachment = new FileAttachment();
-//                    attachment.setMessage(message);
-//                    attachment.setSender(chatService.getUserById(context.senderId));
-//                    attachment.setFileId(fileId);
-//                    attachment.setFileName(context.fileName);
-//                    attachment.setFilePath(tempPath.toString());
-//                    attachment.setFileSize(context.fileSize);
-//                    attachment.setMimeType(detectMimeType(tempPath.toFile()));
-//                    attachment.setStatus(FileStatus.COMPLETED);
-//                    attachment.setChecksum(receivedChecksum);
-//                    
-//                    fileAttachmentDao.save(attachment);
-//                    
-//                    // Update message status to SENT
-//                    dao.MessageDao messageDao = new dao.MessageDao();
-//                    messageDao.updateMessageStatusByClientId(context.clientMessageId, 
-//                        model.Message.MessageStatus.SENT);
-//                    
-//                    System.out.println("✅ File received and saved:");
-//                    System.out.println("   - File ID: " + fileId);
-//                    System.out.println("   - Message ID: " + message.getId());
-//                    System.out.println("   - Storage path: " + tempPath);
-//                    System.out.println("   - Checksum: " + receivedChecksum);
-                    
-                // ✅ QUAN TRỌNG: Notify với File object thật
-//                if (chatController != null) {
-//                    chatController.getFileTransferController().handleFileComplete(fileId);
-//                }
-                
-                // ✅ Notify listener với FILE OBJECT
+                // 2. Notify listener với FILE OBJECT
                 notifyComplete(fileId, tempPath.toFile(), false);
                 
-                 // ✅ Send FILE_ACK back to sender
+             // 3. Render message từ DB (message do sender tạo)
+                Message msg = chatService.findByClientMessageId(context.clientMessageId);
+                if (msg != null && chatController != null) {
+                	chatController.handleIncomingMessage(context.conversationId, msg);
+                }
+                
+                 // 4. Send FILE_ACK back to sender
                 sendFileAck(fileId, context.senderId);
                
             } catch (Exception e) {
@@ -522,21 +500,21 @@ public class FileTransferController {
                  notifyError(fileId, "Failed to save file: " + e.getMessage());
              }
         } else {
-            // ===== SENDER: Update status to COMPLETED =====
+           
             try {
-//                // Update file attachment status
-//                fileAttachmentDao.updateStatus(context.fileAttachmentId, FileStatus.COMPLETED);
-//                
-//                // Update message status
-//                dao.MessageDao messageDao = new dao.MessageDao();
-//                messageDao.updateMessageStatus(context.messageId, model.Message.MessageStatus.SENT);
-                
                 System.out.println("✅ File sent successfully:");
                 System.out.println("   - File ID: " + fileId);
                 System.out.println("   - Message ID: " + context.messageId);
                 System.out.println("   - Attachment ID: " + context.fileAttachmentId);
                 
                 notifyComplete(fileId, context.sourceFile, true);
+                
+                Message msg = chatService.findByClientMessageId(context.clientMessageId);
+
+            
+                if (msg != null && chatController != null) {
+                    chatController.handleIncomingMessage(context.conversationId, msg);
+                }
                 
             } catch (Exception e) {
                 System.err.println("❌ Error updating file status: " + e.getMessage());

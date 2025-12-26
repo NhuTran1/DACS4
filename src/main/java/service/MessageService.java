@@ -119,13 +119,8 @@ public class MessageService {
     }
     
     public void confirmMessageSeenAck(Integer messageId, Integer viewerId) {
-        // Optional: Update message delivery status or log
         System.out.println("✅ Message " + messageId + " seen by user " + viewerId);
-        
-        // You can add additional logic here, such as:
-        // - Update message status to DELIVERED
-        // - Trigger UI notification
-        // - Log to analytics
+
     }
     
     
@@ -274,6 +269,11 @@ public class MessageService {
         // TODO: Implement soft delete or hard delete with permission check
         return false;
     }
+    
+    public Message findByClientMessageId(String clientMessageId) {
+        return messageDao.findByClientMessageId(clientMessageId);
+    }
+
 
     /**
      * Get message statistics

@@ -252,7 +252,7 @@ public class P2PManager implements PeerConnection.P2PMessageHandler {
                 
                 // File transfer - simplified
                 case FILE_CHUNK -> handleFileChunk(msg);
-//                case FILE_COMPLETE -> handleFileComplete(msg);
+                case FILE_COMPLETE -> handleFileComplete(msg);
                 case FILE_CANCEL -> handleFileCancel(msg);
                 case FILE_ACK -> handleFileAck(msg);      // ✅ NEW
                 case FILE_NACK -> handleFileNack(msg);    // ✅ NEW
@@ -403,9 +403,24 @@ public class P2PManager implements PeerConnection.P2PMessageHandler {
         }
     }
 
-//    private void handleFileComplete(P2PMessageProtocol.Message msg) {
-//        fileTransferController.handleFileComplete(msg);
-//    }
+    private void handleFileComplete(P2PMessageProtocol.Message msg) {
+        String fileId = (String) msg.data.get("fileId");
+        
+        if (chatController != null && chatController.getFileTransferController() != null) {
+            chatController.getFileTransferController().handleFileComplete(fileId);
+        }
+        
+     // 2️⃣ GỬI FILE_ACK về sender
+        PeerConnection conn = getOrCreateConnection(msg.from);
+        if (conn != null) {
+            String ack = P2PMessageProtocol.buildFileAck(
+                localUserId,
+                msg.from,
+                fileId
+            );
+            conn.sendTcp(ack);
+        }
+    }
 
     private void handleFileCancel(P2PMessageProtocol.Message msg) {
         String fileId = (String) msg.data.get("fileId");
@@ -467,15 +482,16 @@ public class P2PManager implements PeerConnection.P2PMessageHandler {
      */
     private void handleFileAck(P2PMessageProtocol.Message msg) {
         String fileId = (String) msg.data.get("fileId");
-        
-        if (fileId != null) {
-            System.out.println("✅ Received FILE_ACK for: " + fileId);
-            chatController.getFileTransferController()
-            .handleFileComplete(fileId);
-            // File transfer manager will handle completion
-            //fileTransferManager.handleFileComplete(fileId);
+        if (fileId == null) return;
+
+        System.out.println("✅ Receiver confirmed file: " + fileId);
+
+        // Notify UI (sender side)
+        if (eventListener != null) {
+            eventListener.onFileComplete(fileId, null, true);
         }
     }
+
 
     /**
      * ✅ Handle FILE_NACK from receiver
@@ -526,23 +542,6 @@ public class P2PManager implements PeerConnection.P2PMessageHandler {
                 }
             }
             
-            /**
-             * ✅ Handle FILE_ACK from receiver
-             */
-            private void handleFileAck(P2PMessageProtocol.Message msg) {
-                String fileId = (String) msg.data.get("fileId");
-                
-//                if (fileId != null) {
-//                    System.out.println("✅ Received FILE_ACK for: " + fileId);
-//                    // File transfer manager will handle completion
-//                    fileTransferManager.handleFileComplete(fileId);
-//                }
-                if (chatController != null) {
-                    chatController.getFileTransferController()
-                        .handleFileComplete(fileId);
-                }
-            }
-
             /**
              * ✅ Handle FILE_NACK from receiver
              */

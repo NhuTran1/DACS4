@@ -753,7 +753,12 @@ public class ChatWindow {
 
     	        @Override
     	        public void onFileProgress(String fileId, int progress, boolean isUpload) {
-    	            updateFileProgress(fileId, progress);
+    	        	 Platform.runLater(() -> {
+    	        	        if (!fileProgressDialogs.containsKey(fileId)) {
+    	        	            showFileProgressDialog(fileId, "Sending file...", isUpload);
+    	        	        }
+    	        	        updateFileProgress(fileId, progress);
+    	        	    });
     	        }
 
     	        @Override
@@ -778,8 +783,8 @@ public class ChatWindow {
 //    	                            displayMessage(fileMsg, true);
 //    	                        }
 //    	                    }
-    	                    
-    	                    showSuccessNotification("File sent successfully!");
+    	                	showSuccessNotification("File sent successfully!");
+    	                    System.out.println("✅ Sender: File sent complete (1 log only)");
     	                    return;
     	                }
 
@@ -1089,7 +1094,7 @@ private void sendFileToConversation(File file) {
 
     private void showFileProgressDialog(String fileId, String fileName, boolean isUpload) {
         Platform.runLater(() -> {
-            ProgressDialog dialog = new ProgressDialog(fileName, isUpload);
+            ProgressDialog dialog = new ProgressDialog(fileName, isUpload, fileId);
             fileProgressDialogs.put(fileId, dialog);
             dialog.show();
         });
@@ -1189,9 +1194,11 @@ private class ProgressDialog extends Stage {
     private Label statusLabel;
     private Label speedLabel;
     private long startTime;
+    private final String fileId;
     
-    public ProgressDialog(String fileName, boolean isUpload) {
-        setTitle(isUpload ? "Sending File" : "Receiving File");
+    public ProgressDialog( String fileName, boolean isUpload, String fileId) {
+    	this.fileId = fileId;
+    	setTitle(isUpload ? "Sending File" : "Receiving File");
         setWidth(450);
         setHeight(200);
         setResizable(false);

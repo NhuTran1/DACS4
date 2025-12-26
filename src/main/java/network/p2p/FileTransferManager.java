@@ -115,7 +115,7 @@ public class FileTransferManager {
 //                        listener.onFileProgress(transfer.fileId, progress, true);
 //                    }
                     
-                    System.out.println("✅ File sent successfully: " + transfer.file.getName());
+                    
                     // Small delay to avoid overwhelming network
                     Thread.sleep(10);
                 }

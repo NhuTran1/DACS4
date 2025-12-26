@@ -453,6 +453,13 @@ public class ChatController {
         this.connectionLostCallback = callback;
     }
 
+    public void handleIncomingMessage(Integer conversationId, Message message) {
+        if (messageReceivedCallback != null) {
+            messageReceivedCallback.onMessageReceived(conversationId, message);
+        }
+    }
+
+    
     // ===== P2P LISTENERS =====
     
     private void setupP2PListeners() {
