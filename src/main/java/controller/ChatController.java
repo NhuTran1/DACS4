@@ -66,7 +66,7 @@ public class ChatController {
         this.currentUserId = currentUserId;
         
         // Initialize sub-controllers
-        this.fileTransferController = new FileTransferController(p2pManager, chatService, currentUserId);
+        this.fileTransferController = new FileTransferController(p2pManager, chatService, currentUserId, this);
         //this.audioController = new AudioController(p2pManager, currentUserId);
         
         setupP2PListeners();

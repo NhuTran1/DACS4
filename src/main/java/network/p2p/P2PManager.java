@@ -9,6 +9,8 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
+import controller.ChatController;
+
 /**
  * P2PManager - Router with Idempotent support and simplified file transfer
  */
@@ -17,6 +19,7 @@ public class P2PManager implements PeerConnection.P2PMessageHandler {
     private final Map<Integer, PeerConnection> activeConnections = new ConcurrentHashMap<>();
     private final ChatService chatService;
     private final PeerDiscoveryService discoveryService;
+    private final ChatController chatController;
     
     // Managers
     private final FileTransferManager fileTransferManager;
@@ -46,10 +49,11 @@ public class P2PManager implements PeerConnection.P2PMessageHandler {
         void onConnectionLost(Integer userId);
     }
 
-    public P2PManager(Integer localUserId, ChatService chatService) {
+    public P2PManager(Integer localUserId, ChatService chatService, ChatController chatController) {
         this.localUserId = localUserId;
         this.chatService = chatService;
         this.discoveryService = PeerDiscoveryService.getInstance();
+        this.chatController = chatController;
         
         // Initialize managers
         this.fileTransferManager = new FileTransferManager(this);
@@ -248,7 +252,7 @@ public class P2PManager implements PeerConnection.P2PMessageHandler {
                 
                 // File transfer - simplified
                 case FILE_CHUNK -> handleFileChunk(msg);
-                case FILE_COMPLETE -> handleFileComplete(msg);
+//                case FILE_COMPLETE -> handleFileComplete(msg);
                 case FILE_CANCEL -> handleFileCancel(msg);
                 case FILE_ACK -> handleFileAck(msg);      // ✅ NEW
                 case FILE_NACK -> handleFileNack(msg);    // ✅ NEW
@@ -370,6 +374,7 @@ public class P2PManager implements PeerConnection.P2PMessageHandler {
         Long fileSize = null;
         Integer conversationId = null;
         String clientMessageId = null;
+        String checksum = null;
         
         if (chunkIndex.intValue() == 0) {
             fileName = (String) msg.data.get("fileName");
@@ -378,24 +383,29 @@ public class P2PManager implements PeerConnection.P2PMessageHandler {
             Number convId = (Number) msg.data.get("conversationId");
             conversationId = convId != null ? convId.intValue() : null;
             clientMessageId = (String) msg.data.get("clientMessageId");
+            checksum = (String) msg.data.get("checksum");
         }
         
-        // Forward to FileTransferController via event listener
-        if (eventListener != null) {
-            // Store in temporary map if needed, or handle directly
-            handleFileChunkData(msg.from, fileId, chunkIndex.intValue(), chunkData, 
-                              totalChunks.intValue(), fileName, fileSize, 
-                              conversationId, clientMessageId);
+     // ✅ FORWARD TO FileTransferController
+        if (chatController != null && chatController.getFileTransferController() != null) {
+            chatController.getFileTransferController().handleFileChunk(
+                msg.from, 
+                fileId, 
+                chunkIndex.intValue(), 
+                chunkData,
+                totalChunks.intValue(), 
+                fileName, 
+                fileSize, 
+                conversationId, 
+                clientMessageId,
+                checksum  // ✅ Pass checksum
+            );
         }
     }
 
-    private void handleFileComplete(P2PMessageProtocol.Message msg) {
-        String fileId = (String) msg.data.get("fileId");
-        
-        if (eventListener != null) {
-            eventListener.onFileComplete(fileId, null, false);
-        }
-    }
+//    private void handleFileComplete(P2PMessageProtocol.Message msg) {
+//        fileTransferController.handleFileComplete(msg);
+//    }
 
     private void handleFileCancel(P2PMessageProtocol.Message msg) {
         String fileId = (String) msg.data.get("fileId");
@@ -450,10 +460,39 @@ public class P2PManager implements PeerConnection.P2PMessageHandler {
             System.err.println("❌ Missing metadata for file: " + fileId);
             return;
         }
-        
-        // This will be handled by FileTransferController through ChatController
-        // For now, just store the event
     }
+    
+    /**
+     * ✅ Handle FILE_ACK from receiver
+     */
+    private void handleFileAck(P2PMessageProtocol.Message msg) {
+        String fileId = (String) msg.data.get("fileId");
+        
+        if (fileId != null) {
+            System.out.println("✅ Received FILE_ACK for: " + fileId);
+            chatController.getFileTransferController()
+            .handleFileComplete(fileId);
+            // File transfer manager will handle completion
+            //fileTransferManager.handleFileComplete(fileId);
+        }
+    }
+
+    /**
+     * ✅ Handle FILE_NACK from receiver
+     */
+    private void handleFileNack(P2PMessageProtocol.Message msg) {
+        String fileId = (String) msg.data.get("fileId");
+        String reason = (String) msg.data.get("reason");
+        
+        if (fileId != null) {
+            System.err.println("❌ Received FILE_NACK for: " + fileId + ", reason: " + reason);
+            
+            if (eventListener != null) {
+                eventListener.onFileError(fileId, reason);
+            }
+        }
+    }
+
 
     // ===== SETUP LISTENERS =====
 
@@ -493,10 +532,14 @@ public class P2PManager implements PeerConnection.P2PMessageHandler {
             private void handleFileAck(P2PMessageProtocol.Message msg) {
                 String fileId = (String) msg.data.get("fileId");
                 
-                if (fileId != null) {
-                    System.out.println("✅ Received FILE_ACK for: " + fileId);
-                    // File transfer manager will handle completion
-                    fileTransferManager.handleFileComplete(fileId);
+//                if (fileId != null) {
+//                    System.out.println("✅ Received FILE_ACK for: " + fileId);
+//                    // File transfer manager will handle completion
+//                    fileTransferManager.handleFileComplete(fileId);
+//                }
+                if (chatController != null) {
+                    chatController.getFileTransferController()
+                        .handleFileComplete(fileId);
                 }
             }
 

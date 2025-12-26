@@ -124,7 +124,8 @@ public class P2PMessageProtocol {
             String fileName,
             long fileSize,
             Integer conversationId,
-            String clientMessageId
+            String clientMessageId,
+            String checksum
     ) {
         Message msg = new Message();
         msg.type = MessageType.FILE_CHUNK.name();
@@ -143,6 +144,7 @@ public class P2PMessageProtocol {
             msg.data.put("fileSize", fileSize);
             msg.data.put("conversationId", conversationId);
             msg.data.put("clientMessageId", clientMessageId);
+            msg.data.put("checksum", checksum);
         }
 
         return gson.toJson(msg);

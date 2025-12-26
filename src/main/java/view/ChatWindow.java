@@ -762,11 +762,28 @@ public class ChatWindow {
     	                closeFileProgressDialog(fileId);
 
     	                if (isUpload) {
+    	                	// ✅ SENDER: Tạo message SAU KHI GỬI XONG
+//    	                    if (currentConversation != null && file != null) {
+//    	                        String fileUrl = "file://" + file.getName() + "|" + 
+//    	                                        formatFileSize(file.length());
+//    	                        
+//    	                        Message fileMsg = chatService.sendMessage(
+//    	                            currentConversation.getId(),
+//    	                            currentUserId,
+//    	                            "[File] " + file.getName(),
+//    	                            fileUrl
+//    	                        );
+//    	                        
+//    	                        if (fileMsg != null) {
+//    	                            displayMessage(fileMsg, true);
+//    	                        }
+//    	                    }
+    	                    
     	                    showSuccessNotification("File sent successfully!");
     	                    return;
     	                }
 
-    	                // ⛔ FIX CỐT LÕI
+    	                
     	                if (file == null) {
     	                    showAlert("Error", "File received but file object is null");
     	                    System.err.println("❌ onFileComplete: file is null, fileId=" + fileId);
@@ -778,21 +795,23 @@ public class ChatWindow {
     	                    return;
     	                }
 
-    	                if (currentConversation != null) {
-    	                    String fileUrl = "file://" + file.getName() + "|" +
-    	                                     formatFileSize(file.length());
-
-    	                    Message fileMsg = chatService.sendMessage(
-    	                        currentConversation.getId(),
-    	                        currentChatUser.getId(),
-    	                        "[File] " + file.getName(),
-    	                        fileUrl
-    	                    );
-
-    	                    if (fileMsg != null) {
-    	                        displayMessage(fileMsg, false);
-    	                    }
-    	                }
+    	             // ✅ RECEIVER: Tạo message CHỈ KHI CÓ FILE
+//    	                if (currentConversation != null) {
+//    	                    String fileUrl = "file://" + file.getName() + "|" +
+//    	                                    formatFileSize(file.length());
+//
+//    	                    // ✅ SỬ DỤNG sender ID từ file metadata
+//    	                    Message fileMsg = chatService.sendMessage(
+//    	                        currentConversation.getId(),
+//    	                        currentChatUser.getId(), // sender ID
+//    	                        "[File] " + file.getName(),
+//    	                        fileUrl
+//    	                    );
+//
+//    	                    if (fileMsg != null) {
+//    	                        displayMessage(fileMsg, false);
+//    	                    }
+//    	                }
 
     	                showSuccessNotification("File received: " + file.getName());
     	            });
@@ -1042,19 +1061,19 @@ private void sendFileToConversation(File file) {
 
         
         // Save file message to database (idempotent)
-        String fileUrl = "file://" + file.getName() + "|" + formatFileSize(file.length());
-        Message fileMsg = chatService.sendFileMessageIdempotent(
-            currentConversation.getId(),
-            currentUserId,
-            file.getName(),
-            fileUrl,
-            clientMessageId
-        );
+//        String fileUrl = "file://" + file.getName() + "|" + formatFileSize(file.length());
+//        Message fileMsg = chatService.sendFileMessageIdempotent(
+//            currentConversation.getId(),
+//            currentUserId,
+//            file.getName(),
+//            fileUrl,
+//            clientMessageId
+//        );
         
         // Display in UI
-        if (fileMsg != null) {
-            displayMessage(fileMsg, true);
-        }
+//        if (fileMsg != null) {
+//            displayMessage(fileMsg, true);
+//        }
         
         // Show progress dialog
         showFileProgressDialog(fileId, file.getName(), true);

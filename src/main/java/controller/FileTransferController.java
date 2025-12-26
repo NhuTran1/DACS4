@@ -48,6 +48,7 @@ public class FileTransferController {
     private final ChatService chatService;
     private final FileAttachmentDao fileAttachmentDao;
     private final Integer currentUserId;
+    private final ChatController chatController;
     
     // Storage config
     private static final String STORAGE_BASE_DIR = "file_storage";
@@ -103,11 +104,12 @@ public class FileTransferController {
         }
     }
 
-    public FileTransferController(P2PManager p2pManager, ChatService chatService, Integer currentUserId) {
+    public FileTransferController(P2PManager p2pManager, ChatService chatService, Integer currentUserId, ChatController chatController) {
         this.p2pManager = p2pManager;
         this.chatService = chatService;
         this.currentUserId = currentUserId;
         this.fileAttachmentDao = new FileAttachmentDao();
+        this.chatController = chatController;
         
         initializeStorageDirectories();
     }
@@ -450,7 +452,14 @@ public class FileTransferController {
                     }
                 }
                 
-                System.out.println("✅ File received, checksum: " + receivedChecksum);
+                System.out.println("✅ File received successfully:");
+                System.out.println("   - FileId: " + fileId);
+                System.out.println("   - Path: " + tempPath);
+                System.out.println("   - Size: " + context.fileSize);
+                System.out.println("   - Checksum: " + receivedChecksum);
+                
+                
+                
                 if (checksumValid) {
                     System.out.println("✅ Checksum verified successfully");
                 }
@@ -465,50 +474,47 @@ public class FileTransferController {
                     context.clientMessageId
                 );
                 
-                if (message != null) {
-                    // Create file attachment metadata (COMPLETED status)
-                    FileAttachment attachment = new FileAttachment();
-                    attachment.setMessage(message);
-                    attachment.setSender(chatService.getUserById(context.senderId));
-                    attachment.setFileId(fileId);
-                    attachment.setFileName(context.fileName);
-                    attachment.setFilePath(tempPath.toString());
-                    attachment.setFileSize(context.fileSize);
-                    attachment.setMimeType(detectMimeType(tempPath.toFile()));
-                    attachment.setStatus(FileStatus.COMPLETED);
-                    attachment.setChecksum(receivedChecksum);
+//                
+//                if (message != null) {
+//                    // Create file attachment metadata (COMPLETED status)
+//                    FileAttachment attachment = new FileAttachment();
+//                    attachment.setMessage(message);
+//                    attachment.setSender(chatService.getUserById(context.senderId));
+//                    attachment.setFileId(fileId);
+//                    attachment.setFileName(context.fileName);
+//                    attachment.setFilePath(tempPath.toString());
+//                    attachment.setFileSize(context.fileSize);
+//                    attachment.setMimeType(detectMimeType(tempPath.toFile()));
+//                    attachment.setStatus(FileStatus.COMPLETED);
+//                    attachment.setChecksum(receivedChecksum);
+//                    
+//                    fileAttachmentDao.save(attachment);
+//                    
+//                    // Update message status to SENT
+//                    dao.MessageDao messageDao = new dao.MessageDao();
+//                    messageDao.updateMessageStatusByClientId(context.clientMessageId, 
+//                        model.Message.MessageStatus.SENT);
+//                    
+//                    System.out.println("✅ File received and saved:");
+//                    System.out.println("   - File ID: " + fileId);
+//                    System.out.println("   - Message ID: " + message.getId());
+//                    System.out.println("   - Storage path: " + tempPath);
+//                    System.out.println("   - Checksum: " + receivedChecksum);
                     
-                    fileAttachmentDao.save(attachment);
-                    
-                    // Update message status to SENT
-                    dao.MessageDao messageDao = new dao.MessageDao();
-                    messageDao.updateMessageStatusByClientId(context.clientMessageId, 
-                        model.Message.MessageStatus.SENT);
-                    
-                    System.out.println("✅ File received and saved:");
-                    System.out.println("   - File ID: " + fileId);
-                    System.out.println("   - Message ID: " + message.getId());
-                    System.out.println("   - Storage path: " + tempPath);
-                    System.out.println("   - Checksum: " + receivedChecksum);
-                    
-                 // ✅ Send FILE_ACK back to sender
-                    sendFileAck(fileId, context.senderId);
-                    
-                } else {
-                    System.out.println("⚠️ Message already exists (idempotent): " + context.clientMessageId);
-                }
+                // ✅ QUAN TRỌNG: Notify với File object thật
+//                if (chatController != null) {
+//                    chatController.getFileTransferController().handleFileComplete(fileId);
+//                }
                 
+                // ✅ Notify listener với FILE OBJECT
                 notifyComplete(fileId, tempPath.toFile(), false);
                 
+                 // ✅ Send FILE_ACK back to sender
+                sendFileAck(fileId, context.senderId);
+               
             } catch (Exception e) {
             	 System.err.println("❌ Error saving received file: " + e.getMessage());
                  e.printStackTrace();
-                 
-                 // Update status to FAILED
-                 FileAttachment existing = fileAttachmentDao.findByFileId(fileId);
-                 if (existing != null) {
-                     fileAttachmentDao.updateStatus(existing.getId(), FileStatus.FAILED);
-                 }
                  
                  // ✅ Send FILE_NACK back to sender
                  sendFileNack(fileId, context.senderId, e.getMessage());
@@ -518,12 +524,12 @@ public class FileTransferController {
         } else {
             // ===== SENDER: Update status to COMPLETED =====
             try {
-                // Update file attachment status
-                fileAttachmentDao.updateStatus(context.fileAttachmentId, FileStatus.COMPLETED);
-                
-                // Update message status
-                dao.MessageDao messageDao = new dao.MessageDao();
-                messageDao.updateMessageStatus(context.messageId, model.Message.MessageStatus.SENT);
+//                // Update file attachment status
+//                fileAttachmentDao.updateStatus(context.fileAttachmentId, FileStatus.COMPLETED);
+//                
+//                // Update message status
+//                dao.MessageDao messageDao = new dao.MessageDao();
+//                messageDao.updateMessageStatus(context.messageId, model.Message.MessageStatus.SENT);
                 
                 System.out.println("✅ File sent successfully:");
                 System.out.println("   - File ID: " + fileId);
@@ -535,10 +541,7 @@ public class FileTransferController {
             } catch (Exception e) {
                 System.err.println("❌ Error updating file status: " + e.getMessage());
                 e.printStackTrace();
-                
-                // Update status to FAILED
-                fileAttachmentDao.updateStatus(context.fileAttachmentId, FileStatus.FAILED);
-                notifyError(fileId, "Failed to update status: " + e.getMessage());
+
             }
         }
         

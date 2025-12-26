@@ -118,6 +118,17 @@ public class MessageService {
         );
     }
     
+    public void confirmMessageSeenAck(Integer messageId, Integer viewerId) {
+        // Optional: Update message delivery status or log
+        System.out.println("✅ Message " + messageId + " seen by user " + viewerId);
+        
+        // You can add additional logic here, such as:
+        // - Update message status to DELIVERED
+        // - Trigger UI notification
+        // - Log to analytics
+    }
+    
+    
     public void handleMessageNack(P2PMessageProtocol.Message msg) {
 		String clientMessageId = (String) msg.data.get("clientMessageId");
         messageDao.updateMessageStatusByClientId(
@@ -125,6 +136,13 @@ public class MessageService {
             MessageStatus.FAILED
         );
 	}
+    
+    public void markMessageFailedByClientId(String clientMessageId) {
+        messageDao.updateMessageStatusByClientId(
+            clientMessageId,
+            MessageStatus.FAILED
+        );
+    }
 
     // ===== FILE MESSAGE METHODS =====
     

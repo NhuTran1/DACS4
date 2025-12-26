@@ -204,4 +204,13 @@ public class ChatService {
     public void handleMessageNack(P2PMessageProtocol.Message msg) {
     	messageService.handleMessageNack(msg);
     }
+    
+    public void markMessageFailedByClientId(String clientMessageId) {
+    	messageService.markMessageFailedByClientId(clientMessageId);
+    }
+    
+    public void confirmMessageSeenAck(Integer messageId, Integer viewerId) {
+        messageService.confirmMessageSeenAck(messageId, viewerId);
+    }
+    
 }

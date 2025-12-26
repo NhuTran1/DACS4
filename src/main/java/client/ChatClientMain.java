@@ -43,7 +43,7 @@ public class ChatClientMain {
         p2pServer.start();
 
         // 2. Khởi tạo P2P Manager
-        p2pManager = new P2PManager(userId, chatService);
+        p2pManager = new P2PManager(userId, chatService, null);
         
         // 3. Connect P2PServer với P2PManager
         p2pServer.setMessageHandler((fromUserId, message) -> {

@@ -102,7 +102,7 @@ public class ClientManager {
 	}
 	
 	private void initializeP2PManager() {
-		p2pManager = new P2PManager(userId, chatService);
+		p2pManager = new P2PManager(userId, chatService, null);
 	        
         // Connect P2PServer với P2PManager để forward incoming messages
         p2pServer.setMessageHandler((fromUserId, message) -> {

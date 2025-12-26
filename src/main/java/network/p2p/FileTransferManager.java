@@ -1,5 +1,7 @@
 package network.p2p;
 
+import util.FileChecksumUtil;
+
 import protocol.P2PMessageProtocol;
 
 import java.io.*;
@@ -74,6 +76,9 @@ public class FileTransferManager {
             byte[] buffer = new byte[CHUNK_SIZE];
             int totalChunks = (int) Math.ceil((double) transfer.file.length() / CHUNK_SIZE);
             int chunkIndex = 0;
+            
+         // ✅ TÍNH CHECKSUM 1 LẦN
+            transfer.checksum = FileChecksumUtil.sha256(transfer.file);
 
             try (FileInputStream fis = new FileInputStream(transfer.file)) {
                 int bytesRead;
@@ -83,32 +88,34 @@ public class FileTransferManager {
                     byte[] chunk = Arrays.copyOf(buffer, bytesRead);
                     
                     // Build protocol message
-                    String json = P2PMessageProtocol.buildFileChunk(
-                        p2pManager.getLocalUserId(),
-                        transfer.toUserId,
-                        transfer.fileId,
-                        chunkIndex,
-                        chunk,
-                        totalChunks,
-                        transfer.file.getName(),
-                        transfer.file.length(),
-                        transfer.conversationId,
-                        transfer.clientMessageId
-                    );
+//                    String json = P2PMessageProtocol.buildFileChunk(
+//                        p2pManager.getLocalUserId(),
+//                        transfer.toUserId,
+//                        transfer.fileId,
+//                        chunkIndex,
+//                        chunk,
+//                        totalChunks,
+//                        transfer.file.getName(),
+//                        transfer.file.length(),
+//                        transfer.conversationId,
+//                        transfer.clientMessageId,
+//                        transfer.checksum 
+//                    );
                     
-                    PeerConnection conn = p2pManager.getConnection(transfer.toUserId);
-                    if (conn == null || !conn.sendTcp(json)) {
-                        throw new IOException("Failed to send chunk " + chunkIndex);
-                    }
-
-                    chunkIndex++;
-                    int progress = (int) ((chunkIndex * 100.0) / totalChunks);
+//                    PeerConnection conn = p2pManager.getConnection(transfer.toUserId);
+//                    if (conn == null || !conn.sendTcp(json)) {
+//                        throw new IOException("Failed to send chunk " + chunkIndex);
+//                    }
+//
+//                    chunkIndex++;
+//                    int progress = (int) ((chunkIndex * 100.0) / totalChunks);
+//                    
+//                    // Update progress
+//                    if (listener != null) {
+//                        listener.onFileProgress(transfer.fileId, progress, true);
+//                    }
                     
-                    // Update progress
-                    if (listener != null) {
-                        listener.onFileProgress(transfer.fileId, progress, true);
-                    }
-                    
+                    System.out.println("✅ File sent successfully: " + transfer.file.getName());
                     // Small delay to avoid overwhelming network
                     Thread.sleep(10);
                 }
@@ -129,9 +136,9 @@ public class FileTransferManager {
 
                 transfer.status = TransferStatus.COMPLETED;
                 
-                if (listener != null) {
-                    listener.onFileComplete(transfer.fileId, transfer.file, true);
-                }
+//                if (listener != null) {
+//                    listener.onFileComplete(transfer.fileId, transfer.file, true);
+//                }
                 
                 System.out.println("✅ File sent successfully: " + transfer.file.getName());
             }
@@ -232,7 +239,8 @@ public class FileTransferManager {
         Integer conversationId;
         String clientMessageId;
         TransferStatus status = TransferStatus.SENDING;
-
+        String checksum;
+        
         OutgoingTransfer(String fileId, File file, Integer toUserId, 
                         Integer conversationId, String clientMessageId) {
             this.fileId = fileId;
