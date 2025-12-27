@@ -9,10 +9,8 @@ import java.util.*;
 import java.util.concurrent.*;
 
 /**
- * FileTransferManager - Simplified version (no request/accept/reject)
  * - Chia file thành chunks
  * - Gửi trực tiếp qua TCP
- * - Xử lý progress callback
  * - Hỗ trợ idempotent với clientMessageId
  */
 public class FileTransferManager {
@@ -88,32 +86,32 @@ public class FileTransferManager {
                     byte[] chunk = Arrays.copyOf(buffer, bytesRead);
                     
                     // Build protocol message
-//                    String json = P2PMessageProtocol.buildFileChunk(
-//                        p2pManager.getLocalUserId(),
-//                        transfer.toUserId,
-//                        transfer.fileId,
-//                        chunkIndex,
-//                        chunk,
-//                        totalChunks,
-//                        transfer.file.getName(),
-//                        transfer.file.length(),
-//                        transfer.conversationId,
-//                        transfer.clientMessageId,
-//                        transfer.checksum 
-//                    );
+                   String json = P2PMessageProtocol.buildFileChunk(
+                       p2pManager.getLocalUserId(),
+                       transfer.toUserId,
+                       transfer.fileId,
+                       chunkIndex,
+                       chunk,
+                       totalChunks,
+                       transfer.file.getName(),
+                       transfer.file.length(),
+                       transfer.conversationId,
+                       transfer.clientMessageId,
+                       transfer.checksum 
+                   );
                     
-//                    PeerConnection conn = p2pManager.getConnection(transfer.toUserId);
-//                    if (conn == null || !conn.sendTcp(json)) {
-//                        throw new IOException("Failed to send chunk " + chunkIndex);
-//                    }
-//
-//                    chunkIndex++;
-//                    int progress = (int) ((chunkIndex * 100.0) / totalChunks);
-//                    
-//                    // Update progress
-//                    if (listener != null) {
-//                        listener.onFileProgress(transfer.fileId, progress, true);
-//                    }
+                   PeerConnection conn = p2pManager.getConnection(transfer.toUserId);
+                   if (conn == null || !conn.sendTcp(json)) {
+                       throw new IOException("Failed to send chunk " + chunkIndex);
+                   }
+
+                   chunkIndex++;
+                   int progress = (int) ((chunkIndex * 100.0) / totalChunks);
+                   
+                   // Update progress
+                   if (listener != null) {
+                       listener.onFileProgress(transfer.fileId, progress, true);
+                   }
                     
                     
                     // Small delay to avoid overwhelming network
