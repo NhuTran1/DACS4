@@ -401,15 +401,19 @@ public class ChatController {
                     }
                 }
 
-                if (memberIds.size() < 2) {
-                    callback.accept(new OperationResult(false, "Group needs at least 2 members"));
+                if (memberIds.size() < 3) {
+                    callback.accept(new OperationResult(false, "Group needs at least 3 members (including you)"));
                     return;
                 }
 
-                // TODO: Create group in database
-                // Conversation group = chatService.createGroupConversation(groupName, memberIds);
+                // Create group in database
+                Conversation group = chatService.createGroupConversation(groupName, memberIds);
                 
-                callback.accept(new OperationResult(false, "Group creation - Not implemented yet"));
+                if (group != null) {
+                    callback.accept(new OperationResult(true, "Group created successfully", group));
+                } else {
+                    callback.accept(new OperationResult(false, "Failed to create group. Please try again."));
+                }
 
             } catch (Exception e) {
                 callback.accept(new OperationResult(false, "Error: " + e.getMessage()));

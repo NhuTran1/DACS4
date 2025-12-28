@@ -138,6 +138,7 @@ public class PeerDiscoveryService {
     }
 
     public List<PeerInfo> getAllPeers() {
+        // if (p.getUserId().equals(localUserId)) continue;
         return new ArrayList<>(activePeers.values());
     }
 
@@ -168,6 +169,12 @@ public class PeerDiscoveryService {
         }
         return out;
     }
+
+    //phục vụ chức năng tab online
+    public List<PeerInfo> getOnlinePeers() {
+        return new ArrayList<>(activePeers.values());
+    }
+
 
     public void clearAll() {
         activePeers.clear();

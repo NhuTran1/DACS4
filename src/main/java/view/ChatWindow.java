@@ -19,6 +19,7 @@ import javafx.stage.FileChooser;
 import javafx.stage.Stage;
 import javafx.util.Duration;
 import model.Conversation;
+import model.FriendRequest;
 import model.Message;
 import model.Users;
 import network.p2p.P2PManager;
@@ -40,7 +41,10 @@ public class ChatWindow {
     private final ClientManager clientManager;
     
     // UI Components
+    private TabPane leftTabPane;
+    private ListView<PeerInfo> onlineListView;
     private ListView<Users> friendListView;
+    private ListView<Conversation> groupListView;
     private VBox messageArea;
     private ScrollPane messageScrollPane;
     private TextField messageInput;
@@ -52,6 +56,10 @@ public class ChatWindow {
     private Conversation currentConversation;
     private Users currentChatUser;
     private Map<Integer, Circle> userStatusIndicators = new HashMap<>();
+    
+    // ✅ Shutdown management
+    private javafx.animation.Timeline statusRefreshTimeline;
+    private volatile boolean isShuttingDown = false;
     
     private static final DateTimeFormatter TIME_FORMATTER = DateTimeFormatter.ofPattern("HH:mm");
 
@@ -71,8 +79,8 @@ public class ChatWindow {
         BorderPane root = new BorderPane();
         root.setStyle("-fx-background-color: #0a0e27;");
 
-        // Left Sidebar - Friends List
-        VBox sidebar = createSidebar();
+        // Left Sidebar với 3 tabs
+        VBox sidebar = createSidebarWithTabs();
         
         // Center Chat Area
         VBox chatArea = createChatArea();
@@ -80,77 +88,689 @@ public class ChatWindow {
         root.setLeft(sidebar);
         root.setCenter(chatArea);
 
-        
         Scene scene = new Scene(root, 1400, 850);
         stage.setScene(scene);
         stage.setTitle("Chat Application");
-        
-     // Cho phép resize
         stage.setResizable(true);
-
-        // Đặt kích thước tối thiểu để giao diện không bị méo
         stage.setMinWidth(800);
         stage.setMinHeight(600);
         
         scene.getStylesheets().add(
-                getClass().getResource("/css/chat.css").toExternalForm()
-            );
+            getClass().getResource("/css/chat.css").toExternalForm()
+        );
         
-        // Handle window close
         stage.setOnCloseRequest(e -> {
-            if (clientManager != null) {
-                clientManager.shutdown();
-            }
-            if (chatController != null) {
-                chatController.shutdown();
-            }
-            // Exit the application completely
-            Platform.exit();
-            System.exit(0);
+            // ✅ Prevent default close behavior
+            e.consume();
+            
+            // ✅ Shutdown in background thread to avoid blocking UI
+            new Thread(() -> {
+                try {
+                    isShuttingDown = true;
+                    
+                    // ✅ Stop all animations and timers on JavaFX thread
+                    Platform.runLater(() -> {
+                        try {
+                            if (statusRefreshTimeline != null) {
+                                statusRefreshTimeline.stop();
+                            }
+                            
+                            // ✅ Close all open dialogs
+                            closeAllDialogs();
+                        } catch (Exception ex) {
+                            System.err.println("⚠️ Error stopping animations: " + ex.getMessage());
+                        }
+                    });
+                    
+                    // ✅ Wait a bit for UI updates to complete
+                    Thread.sleep(50); // Reduced from 150ms
+                    
+                    // ✅ Shutdown controllers (non-blocking with timeout)
+                    shutdownControllers();
+                    
+                    // ✅ Force exit immediately (no additional delay)
+                    
+                    // ✅ Exit on JavaFX thread
+                    Platform.runLater(() -> {
+                        try {
+                            Platform.exit();
+                        } catch (Exception ex) {
+                            // Ignore
+                        }
+                        System.exit(0);
+                    });
+                    
+                } catch (InterruptedException ex) {
+                    Thread.currentThread().interrupt();
+                    // ✅ Force exit on interrupt
+                    Platform.runLater(() -> {
+                        Platform.exit();
+                        System.exit(0);
+                    });
+                } catch (Exception ex) {
+                    System.err.println("❌ Error during shutdown: " + ex.getMessage());
+                    // ✅ Force exit even if shutdown fails
+                    Platform.runLater(() -> {
+                        Platform.exit();
+                        System.exit(0);
+                    });
+                }
+            }, "ShutdownThread").start();
         });
+        
+        // ✅ Set implicit exit to ensure app closes properly
+        Platform.setImplicitExit(true);
         
         stage.show();
         
-        // Load friends and their online status
-        loadFriendsWithStatus();
-        
-        // Periodic refresh for online status
+        loadAllData();
         startStatusRefreshTimer();
     }
 
-    // ===== SIDEBAR - FRIENDS LIST =====
-    private VBox createSidebar() {
+    // ===== SIDEBAR WITH 3 TABS =====
+    private VBox createSidebarWithTabs() {
         VBox sidebar = new VBox(15);
         sidebar.setPrefWidth(350);
         sidebar.setStyle("-fx-background-color: #1a1d2e; -fx-padding: 20;");
 
-        // Header with user info
+        // Header
         HBox header = createSidebarHeader();
         
-        // Search box
+        // Search box - dynamic based on selected tab
         TextField searchField = createSearchField();
         
-        // Friends list
+        // Update search placeholder when tab changes
+        leftTabPane = new TabPane();
+        leftTabPane.getSelectionModel().selectedItemProperty().addListener((obs, oldTab, newTab) -> {
+            if (newTab != null) {
+                String tabText = newTab.getText();
+                if (tabText.contains("Friends")) {
+                    searchField.setPromptText("🔍 Search friends...");
+                } else if (tabText.contains("Groups")) {
+                    searchField.setPromptText("🔍 Search groups...");
+                } else if (tabText.contains("Online")) {
+                    searchField.setPromptText("🔍 Search online users...");
+                }
+            }
+        });
+        
+        // Dynamic search based on selected tab
+        searchField.textProperty().addListener((obs, old, newVal) -> {
+            Tab selectedTab = leftTabPane.getSelectionModel().getSelectedItem();
+            if (selectedTab != null) {
+                String tabText = selectedTab.getText();
+                if (tabText.contains("Friends")) {
+                    filterFriends(newVal);
+                } else if (tabText.contains("Groups")) {
+                    filterGroups(newVal);
+                } else if (tabText.contains("Online")) {
+                    filterOnlineUsers(newVal);
+                }
+            }
+        });
+        
+        // Tab Pane với styling đẹp
+        leftTabPane = new TabPane();
+        leftTabPane.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
+        leftTabPane.setStyle("""
+            -fx-background-color: transparent;
+            -fx-tab-min-width: 100;
+            -fx-tab-max-width: 120;
+        """);
+        
+        // Style cho tabs
+        leftTabPane.getStyleClass().add("custom-tab-pane");
+        
+        // Tab 1: Online Users
+        Tab onlineTab = createOnlineTab();
+        
+        // Tab 2: Friends
+        Tab friendTab = createFriendTab();
+        
+        // Tab 3: Groups
+        Tab groupTab = createGroupTab();
+        
+        leftTabPane.getTabs().addAll(onlineTab, friendTab, groupTab);
+        VBox.setVgrow(leftTabPane, Priority.ALWAYS);
+
+        sidebar.getChildren().addAll(header, searchField, leftTabPane);
+        return sidebar;
+    }
+
+    // ===== TAB 1: ONLINE USERS =====
+    private Tab createOnlineTab() {
+        Tab tab = new Tab("🌐");
+        tab.setStyle("""
+            -fx-background-color: #262b40;
+            -fx-text-fill: #aaaaaa;
+            -fx-font-weight: bold;
+        """);
+        
+        VBox content = new VBox(7);
+        content.setPadding(new Insets(10));
+        
+        Label infoLabel = new Label("Users online in your network");
+        infoLabel.setTextFill(Color.web("#aaaaaa"));
+        infoLabel.setFont(Font.font(12));
+        
+        onlineListView = new ListView<>();
+        onlineListView.setStyle("""
+            -fx-background-color: transparent;
+            -fx-border-width: 0;
+        """);
+        onlineListView.setCellFactory(lv -> new OnlineUserCell());
+        onlineListView.setOnMouseClicked(e -> {
+            if (e.getClickCount() == 2) {
+                PeerInfo selected = onlineListView.getSelectionModel().getSelectedItem();
+                if (selected != null) {
+                    showAddFriendDialog(selected);
+                }
+            }
+        });
+        
+        VBox.setVgrow(onlineListView, Priority.ALWAYS);
+        
+        content.getChildren().addAll(infoLabel, onlineListView);
+        tab.setContent(content);
+        
+        return tab;
+    }
+
+    // ===== TAB 2: FRIENDS =====
+    private Tab createFriendTab() {
+        Tab tab = new Tab("👥");
+        tab.setStyle("""
+            -fx-background-color: #262b40;
+            -fx-text-fill: #aaaaaa;
+            -fx-font-weight: bold;
+        """);
+        
+        VBox content = new VBox(7);
+        content.setPadding(new Insets(10));
+        
+        HBox headerBox = new HBox(10);
+        headerBox.setAlignment(Pos.CENTER_LEFT);
+        
+        Label infoLabel = new Label("Your friends");
+        infoLabel.setTextFill(Color.web("#aaaaaa"));
+        infoLabel.setFont(Font.font(12));
+        HBox.setHgrow(infoLabel, Priority.ALWAYS);
+        
+        // Button to view friend requests
+        Button requestBtn = createIconButton("fas-user-plus", 30);
+        requestBtn.setTooltip(new Tooltip("Friend Requests"));
+        requestBtn.setOnAction(e -> showFriendRequestsDialog());
+        
+        headerBox.getChildren().addAll(infoLabel, requestBtn);
+        
         friendListView = new ListView<>();
         friendListView.setStyle("""
             -fx-background-color: transparent;
             -fx-border-width: 0;
-            -fx-focus-color: transparent;
         """);
         friendListView.setCellFactory(lv -> new FriendCell());
         friendListView.setOnMouseClicked(e -> {
-            Users selectedFriend = friendListView.getSelectionModel().getSelectedItem();
-            if (selectedFriend != null) {
-                openChatWithUser(selectedFriend);
+            Users selected = friendListView.getSelectionModel().getSelectedItem();
+            if (selected != null) {
+                openChatWithUser(selected);
             }
         });
         
         VBox.setVgrow(friendListView, Priority.ALWAYS);
-
-        sidebar.getChildren().addAll(header, searchField, friendListView);
-        return sidebar;
+        
+        content.getChildren().addAll(headerBox, friendListView);
+        tab.setContent(content);
+        
+        return tab;
     }
 
+    // ===== TAB 3: GROUPS =====
+    private Tab createGroupTab() {
+        Tab tab = new Tab("💬");
+        tab.setStyle("""
+            -fx-background-color: #262b40;
+            -fx-text-fill: #aaaaaa;
+            -fx-font-weight: bold;
+        """);
+        
+        VBox content = new VBox(10);
+        content.setPadding(new Insets(10));
+        
+        HBox headerBox = new HBox(10);
+        headerBox.setAlignment(Pos.CENTER_LEFT);
+        
+        Label infoLabel = new Label("Your group chats");
+        infoLabel.setTextFill(Color.web("#aaaaaa"));
+        infoLabel.setFont(Font.font(12));
+        HBox.setHgrow(infoLabel, Priority.ALWAYS);
+        
+        // Button to create new group
+        Button createGroupBtn = createIconButton("fas-plus", 30);
+        createGroupBtn.setTooltip(new Tooltip("Create Group"));
+        createGroupBtn.setOnAction(e -> showCreateGroupDialog());
+        
+        headerBox.getChildren().addAll(infoLabel, createGroupBtn);
+        
+        groupListView = new ListView<>();
+        groupListView.setStyle("""
+            -fx-background-color: transparent;
+            -fx-border-width: 0;
+        """);
+        groupListView.setCellFactory(lv -> new GroupCell());
+        groupListView.setOnMouseClicked(e -> {
+            Conversation selected = groupListView.getSelectionModel().getSelectedItem();
+            if (selected != null) {
+                openGroupConversation(selected);
+            }
+        });
+        
+        VBox.setVgrow(groupListView, Priority.ALWAYS);
+        
+        content.getChildren().addAll(headerBox, groupListView);
+        tab.setContent(content);
+        
+        return tab;
+    }
+
+ // ===== CUSTOM CELLS =====
+    private class OnlineUserCell extends ListCell<PeerInfo> {
+        @Override
+        protected void updateItem(PeerInfo peer, boolean empty) {
+            super.updateItem(peer, empty);
+            
+            if (empty || peer == null) {
+                setText(null);
+                setGraphic(null);
+                return;
+            }
+
+            HBox cell = new HBox(15);
+            cell.setPadding(new Insets(12, 15, 12, 15));
+            cell.setAlignment(Pos.CENTER_LEFT);
+            cell.setStyle("""
+                -fx-background-color: transparent;
+                -fx-background-radius: 12;
+                -fx-cursor: hand;
+            """);
+
+            StackPane avatarStack = createAvatarWithStatus("👤", true, 45);
+
+            VBox info = new VBox(5);
+            HBox.setHgrow(info, Priority.ALWAYS);
+
+            Users user = chatService.getUserById(peer.getUserId());
+            String displayName = user != null ? user.getDisplayName() : "User" + peer.getUserId();
+            
+            Label nameLabel = new Label(displayName);
+            nameLabel.setFont(Font.font("System", FontWeight.BOLD, 15));
+            nameLabel.setTextFill(Color.web("#ffffff"));
+
+            Label statusLabel = new Label("🟢 Online • " + peer.getIp());
+            statusLabel.setFont(Font.font(11));
+            statusLabel.setTextFill(Color.web("#4ade80"));
+
+            info.getChildren().addAll(nameLabel, statusLabel);
+            
+            if (peer.getUserId().equals(currentUserId)) {
+                return;
+            }
+            
+            // Check if already friend
+            boolean isFriend = chatService.listFriends(currentUserId).stream()
+                .anyMatch(f -> f.getId().equals(peer.getUserId()));
+                
+            
+            if (isFriend) {
+                Label friendBadge = new Label("✓ Friend");
+                friendBadge.setFont(Font.font("System", FontWeight.BOLD, 10));
+                friendBadge.setTextFill(Color.web("#4ade80"));
+                friendBadge.setStyle("""
+                    -fx-background-color: rgba(74, 222, 128, 0.2);
+                    -fx-background-radius: 8;
+                    -fx-padding: 3 8;
+                """);
+                cell.getChildren().addAll(avatarStack, info, friendBadge);
+            } else {
+                Button addBtn = new Button("+");
+                addBtn.setStyle("""
+                    -fx-background-color: #667eea;
+                    -fx-text-fill: white;
+                    -fx-background-radius: 50%;
+                    -fx-min-width: 30;
+                    -fx-min-height: 30;
+                    -fx-font-weight: bold;
+                    -fx-cursor: hand;
+                """);
+                addBtn.setOnAction(e -> showAddFriendDialog(peer));
+                cell.getChildren().addAll(avatarStack, info, addBtn);
+            }
+
+            setGraphic(cell);
+            setStyle("-fx-background-color: transparent; -fx-padding: 5;");
+            
+            cell.setOnMouseEntered(e -> 
+                cell.setStyle(cell.getStyle() + "-fx-background-color: #262b40;")
+            );
+            cell.setOnMouseExited(e -> 
+                cell.setStyle(cell.getStyle().replace("-fx-background-color: #262b40;", ""))
+            );
+        }
+    }
+
+    private class FriendCell extends ListCell<Users> {
+        @Override
+        protected void updateItem(Users friend, boolean empty) {
+            super.updateItem(friend, empty);
+            
+            if (empty || friend == null) {
+                setText(null);
+                setGraphic(null);
+                return;
+            }
+
+            HBox cell = new HBox(15);
+            cell.setPadding(new Insets(12, 15, 12, 15));
+            cell.setAlignment(Pos.CENTER_LEFT);
+            cell.setStyle("""
+                -fx-background-color: transparent;
+                -fx-background-radius: 12;
+                -fx-cursor: hand;
+            """);
+
+            boolean isOnline = isUserOnline(friend.getId());
+            StackPane avatarStack = createAvatarWithStatus("👤", isOnline, 45);
+
+            VBox info = new VBox(5);
+            HBox.setHgrow(info, Priority.ALWAYS);
+
+            Label nameLabel = new Label(friend.getDisplayName());
+            nameLabel.setFont(Font.font("System", FontWeight.BOLD, 15));
+            nameLabel.setTextFill(Color.web("#ffffff"));
+
+            Label statusLabel = new Label(isOnline ? "Online" : "Offline");
+            statusLabel.setFont(Font.font(12));
+            statusLabel.setTextFill(isOnline ? Color.web("#4ade80") : Color.web("#6b7280"));
+
+            info.getChildren().addAll(nameLabel, statusLabel);
+            cell.getChildren().addAll(avatarStack, info);
+
+            setGraphic(cell);
+            setStyle("-fx-background-color: transparent; -fx-padding: 5;");
+            
+            cell.setOnMouseEntered(e -> 
+                cell.setStyle(cell.getStyle() + "-fx-background-color: #262b40;")
+            );
+            cell.setOnMouseExited(e -> 
+                cell.setStyle(cell.getStyle().replace("-fx-background-color: #262b40;", ""))
+            );
+        }
+    }
+
+    private class GroupCell extends ListCell<Conversation> {
+        @Override
+        protected void updateItem(Conversation group, boolean empty) {
+            super.updateItem(group, empty);
+            
+            if (empty || group == null) {
+                setText(null);
+                setGraphic(null);
+                return;
+            }
+
+            HBox cell = new HBox(15);
+            cell.setPadding(new Insets(12, 15, 12, 15));
+            cell.setAlignment(Pos.CENTER_LEFT);
+            cell.setStyle("""
+                -fx-background-color: transparent;
+                -fx-background-radius: 12;
+                -fx-cursor: hand;
+            """);
+
+            Circle avatar = new Circle(22.5);
+            avatar.setFill(Color.web("#764ba2"));
+            
+            Label avatarLabel = new Label("👥");
+            avatarLabel.setFont(Font.font(25));
+            
+            StackPane avatarStack = new StackPane(avatar, avatarLabel);
+
+            VBox info = new VBox(5);
+            HBox.setHgrow(info, Priority.ALWAYS);
+
+            Label nameLabel = new Label(group.getName() != null ? group.getName() : "Group " + group.getId());
+            nameLabel.setFont(Font.font("System", FontWeight.BOLD, 15));
+            nameLabel.setTextFill(Color.web("#ffffff"));
+
+            List<Users> participants = chatService.listParticipants(group.getId());
+            Label memberLabel = new Label(participants.size() + " members");
+            memberLabel.setFont(Font.font(12));
+            memberLabel.setTextFill(Color.web("#aaaaaa"));
+
+            info.getChildren().addAll(nameLabel, memberLabel);
+            cell.getChildren().addAll(avatarStack, info);
+
+            setGraphic(cell);
+            setStyle("-fx-background-color: transparent; -fx-padding: 5;");
+            
+            cell.setOnMouseEntered(e -> 
+                cell.setStyle(cell.getStyle() + "-fx-background-color: #262b40;")
+            );
+            cell.setOnMouseExited(e -> 
+                cell.setStyle(cell.getStyle().replace("-fx-background-color: #262b40;", ""))
+            );
+        }
+    }
+
+    // ===== DIALOGS =====
+    private void showAddFriendDialog(PeerInfo peer) {
+        Users user = chatService.getUserById(peer.getUserId());
+        if (user == null) {
+            showAlert("Error", "User not found");
+            return;
+        }
+
+        Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
+        alert.setTitle("Add Friend");
+        alert.setHeaderText("Send friend request to " + user.getDisplayName() + "?");
+        alert.setContentText("They will need to accept your request before you can chat.");
+        
+        alert.showAndWait().ifPresent(response -> {
+            if (response == ButtonType.OK) {
+                try {
+                    chatService.sendFriendRequest(currentUserId, peer.getUserId());
+                    showSuccess("Friend request sent!");
+                } catch (Exception e) {
+                    showAlert("Error", "Failed to send friend request: " + e.getMessage());
+                }
+            }
+        });
+    }
+
+    private void showFriendRequestsDialog() {
+        Dialog<ButtonType> dialog = new Dialog<>();
+        dialog.setTitle("Friend Requests");
+        dialog.setHeaderText("Pending friend requests");
+        
+        VBox content = new VBox(10);
+        content.setPadding(new Insets(20));
+        content.setPrefWidth(400);
+        
+        List<FriendRequest> requests = chatService.listFriendRequest(currentUserId);
+        
+        if (requests.isEmpty()) {
+            Label noRequests = new Label("No pending friend requests");
+            noRequests.setTextFill(Color.web("#aaaaaa"));
+            content.getChildren().add(noRequests);
+        } else {
+            for (FriendRequest request : requests) {
+                HBox requestBox = new HBox(15);
+                requestBox.setAlignment(Pos.CENTER_LEFT);
+                requestBox.setPadding(new Insets(10));
+                requestBox.setStyle("""
+                    -fx-background-color: #262b40;
+                    -fx-background-radius: 10;
+                """);
+                
+                Label nameLabel = new Label(request.getFromUser().getDisplayName());
+                nameLabel.setTextFill(Color.WHITE);
+                nameLabel.setFont(Font.font("System", FontWeight.BOLD, 14));
+                HBox.setHgrow(nameLabel, Priority.ALWAYS);
+                
+                Button acceptBtn = new Button("Accept");
+                acceptBtn.setStyle("""
+                    -fx-background-color: #4ade80;
+                    -fx-text-fill: white;
+                    -fx-background-radius: 8;
+                    -fx-padding: 5 15;
+                    -fx-cursor: hand;
+                """);
+                acceptBtn.setOnAction(e -> {
+                    chatService.acceptFriendRequest(request.getId());
+                    dialog.close();
+                    loadAllData();
+                    showSuccess("Friend request accepted!");
+                });
+                
+                Button rejectBtn = new Button("Reject");
+                rejectBtn.setStyle("""
+                    -fx-background-color: #ef4444;
+                    -fx-text-fill: white;
+                    -fx-background-radius: 8;
+                    -fx-padding: 5 15;
+                    -fx-cursor: hand;
+                """);
+                rejectBtn.setOnAction(e -> {
+                    chatService.denyFriendRequest(request.getId());
+                    dialog.close();
+                    loadAllData();
+                });
+                
+                requestBox.getChildren().addAll(nameLabel, acceptBtn, rejectBtn);
+                content.getChildren().add(requestBox);
+            }
+        }
+        
+        dialog.getDialogPane().setContent(content);
+        dialog.getDialogPane().getButtonTypes().add(ButtonType.CLOSE);
+        dialog.showAndWait();
+    }
+
+    private void showCreateGroupDialog() {
+        Dialog<ButtonType> dialog = new Dialog<>();
+        dialog.setTitle("Create Group");
+        dialog.setHeaderText("Create a new group chat");
+        
+        VBox content = new VBox(15);
+        content.setPadding(new Insets(20));
+        content.setPrefWidth(400);
+       
+        
+        TextField groupNameField = new TextField();
+        groupNameField.setPromptText("Group name");
+        groupNameField.setPrefHeight(40);
+        
+        Label selectLabel = new Label("Select members (at least 2 friends, 3 people total):");
+        selectLabel.setTextFill(Color.WHITE);
+        
+        ListView<Users> friendSelectList = new ListView<>();
+        friendSelectList.setPrefHeight(200);
+        friendSelectList.getSelectionModel().setSelectionMode(SelectionMode.MULTIPLE);
+        friendSelectList.getItems().setAll(chatService.listFriends(currentUserId));
+        friendSelectList.setCellFactory(lv -> new ListCell<Users>() {
+            @Override
+            protected void updateItem(Users user, boolean empty) {
+                super.updateItem(user, empty);
+
+                if (empty || user == null) {
+                    setText(null);
+                    setStyle("-fx-background-color: #000000;");
+                    return;
+                }
+
+                setText(user.getDisplayName());
+                setTextFill(Color.WHITE);
+
+                setStyle("-fx-background-color: #000000; -fx-padding: 8 12;");
+
+                // Hover
+                setOnMouseEntered(e ->
+                    setStyle("-fx-background-color: #1f2937; -fx-padding: 8 12;")
+                );
+
+                setOnMouseExited(e ->
+                    setStyle(isSelected()
+                        ? "-fx-background-color: #374151; -fx-padding: 8 12;"
+                        : "-fx-background-color: #000000; -fx-padding: 8 12;"
+                    )
+                );
+
+                // Selected
+                selectedProperty().addListener((obs, oldVal, selected) -> {
+                    if (selected) {
+                        setStyle("-fx-background-color: #374151; -fx-padding: 8 12;");
+                    } else {
+                        setStyle("-fx-background-color: #000000; -fx-padding: 8 12;");
+                    }
+                });
+            }
+        });
+
+        
+        content.getChildren().addAll(groupNameField, selectLabel, friendSelectList);
+        
+        dialog.getDialogPane().setContent(content);
+        dialog.getDialogPane().getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
+        
+        dialog.showAndWait().ifPresent(response -> {
+            if (response == ButtonType.OK) {
+                String groupName = groupNameField.getText().trim();
+                List<Users> selectedMembers = new ArrayList<>(friendSelectList.getSelectionModel().getSelectedItems());
+                
+                if (groupName.isEmpty()) {
+                    showAlert("Error", "Please enter a group name");
+                    return;
+                }
+                
+                if (selectedMembers.size() < 2) {
+                    showAlert("Error", "Please select at least 2 friends (3 people total including you)");
+                    return;
+                }
+                
+                // Create group (you'll need to implement this in ChatService)
+                String[] usernames = selectedMembers.stream()
+                    .map(Users::getUsername)
+                    .toArray(String[]::new);
+                
+                chatController.createGroupConversation(groupName, usernames, result -> {
+                    Platform.runLater(() -> {
+                        if (result.success) {
+                            loadAllData();
+                            showSuccess("Group '" + groupName + "' created successfully!");
+                            dialog.close();
+                        } else {
+                            showAlert("Error", result.message);
+                        }
+                    });
+                });
+            }
+        });
+    }
+    
+    private void loadAllData() {
+        Platform.runLater(() -> {
+            refreshOnlineUsers();
+            refreshFriends();
+            refreshGroups();
+        });
+    }
+
+    private void showSuccess(String message) {
+        Alert alert = new Alert(Alert.AlertType.INFORMATION);
+        alert.setTitle("Success");
+        alert.setContentText(message);
+        alert.show();
+    }
+    
     private HBox createSidebarHeader() {
         HBox header = new HBox(15);
         header.setAlignment(Pos.CENTER_LEFT);
@@ -183,7 +803,7 @@ public class ChatWindow {
 
     private TextField createSearchField() {
         TextField search = new TextField();
-        search.setPromptText("🔍 Search friends...");
+        search.setPromptText("🔍 Search...");
         search.setPrefHeight(45);
         search.setStyle("""
             -fx-background-color: #262b40;
@@ -195,9 +815,45 @@ public class ChatWindow {
             -fx-font-size: 14;
         """);
         
-        search.textProperty().addListener((obs, old, newVal) -> filterFriends(newVal));
-        
         return search;
+    }
+    
+    private void filterOnlineUsers(String keyword) {
+        if (keyword == null || keyword.isEmpty()) {
+            refreshOnlineUsers();
+            return;
+        }
+        
+        List<PeerInfo> allPeers = clientManager != null ? clientManager.getOnlinePeers() : new ArrayList<>();
+        allPeers = allPeers.stream()
+            .filter(p -> !p.getUserId().equals(currentUserId))
+            .filter(p -> {
+                Users user = chatService.getUserById(p.getUserId());
+                if (user == null) return false;
+                return user.getDisplayName().toLowerCase().contains(keyword.toLowerCase()) ||
+                       user.getUsername().toLowerCase().contains(keyword.toLowerCase()) ||
+                       p.getIp().contains(keyword);
+            })
+            .toList();
+        
+        onlineListView.getItems().setAll(allPeers);
+    }
+    
+    private void filterGroups(String keyword) {
+        if (keyword == null || keyword.isEmpty()) {
+            refreshGroups();
+            return;
+        }
+        
+        List<Conversation> allGroups = chatService.listConversationsByUser(currentUserId).stream()
+            .filter(c -> c.getType() == Conversation.ConversationType.group)
+            .filter(c -> {
+                String name = c.getName() != null ? c.getName() : "Group " + c.getId();
+                return name.toLowerCase().contains(keyword.toLowerCase());
+            })
+            .toList();
+        
+        groupListView.getItems().setAll(allGroups);
     }
 
     // ===== CHAT AREA =====
@@ -347,6 +1003,34 @@ public class ChatWindow {
         stack.getChildren().addAll(avatarBg, avatarLabel, statusIndicator);
         return stack;
     }
+    
+    private void openGroupConversation(Conversation group) {
+        currentConversation = group;
+        currentChatUser = null;
+        chatTitleLabel.setText(group.getName() != null ? group.getName() : "Group " + group.getId());
+        
+        List<Users> participants = chatService.listParticipants(group.getId());
+        chatStatusLabel.setText(participants.size() + " members");
+        chatStatusLabel.setTextFill(Color.web("#aaaaaa"));
+        
+        loadMessages();
+    }
+    
+    private void loadMessages() {
+        messageArea.getChildren().clear();
+        if (currentConversation != null) {
+            List<Message> messages = chatService.listMessages(currentConversation.getId());
+            for (Message msg : messages) {
+                boolean isOwn = msg.getSender().getId().equals(currentUserId);
+                displayMessage(msg, isOwn);
+                
+                if (!isOwn && msg.getStatus() != Message.MessageStatus.DELIVERED) {
+                    chatController.markMessageAsSeen(msg.getId());
+                }
+            }
+        }
+    }
+    
 
     private Button createIconButton(String iconName, double size) {
         FontIcon icon = new FontIcon(iconName); // ví dụ "fas-cog"
@@ -587,72 +1271,73 @@ public class ChatWindow {
     );
 }
 
-    // ===== FRIEND CELL =====
-    private class FriendCell extends ListCell<Users> {
-        @Override
-        protected void updateItem(Users friend, boolean empty) {
-            super.updateItem(friend, empty);
-            
-            if (empty || friend == null) {
-                setText(null);
-                setGraphic(null);
-                return;
+    // ===== SHUTDOWN HELPERS =====
+    
+    private void closeAllDialogs() {
+        try {
+            // Close all file progress dialogs
+            if (fileProgressDialogs != null) {
+                for (ProgressDialog dialog : new ArrayList<>(fileProgressDialogs.values())) {
+                    try {
+                        dialog.close();
+                    } catch (Exception e) {
+                        // Ignore
+                    }
+                }
+                fileProgressDialogs.clear();
             }
-
-            HBox cell = new HBox(15);
-            cell.setPadding(new Insets(12, 15, 12, 15));
-            cell.setAlignment(Pos.CENTER_LEFT);
-            cell.setStyle("""
-                -fx-background-color: transparent;
-                -fx-background-radius: 12;
-                -fx-cursor: hand;
-            """);
-
-            // Check online status
-            boolean isOnline = isUserOnline(friend.getId());
             
-            // Avatar with status
-            StackPane avatarStack = createAvatarWithStatus("👤", isOnline, 45);
-
-            VBox info = new VBox(5);
-            HBox.setHgrow(info, Priority.ALWAYS);
-
-            Label nameLabel = new Label(friend.getDisplayName());
-            nameLabel.setFont(Font.font("System", FontWeight.BOLD, 15));
-            nameLabel.setTextFill(Color.web("#ffffff"));
-
-            Label statusLabel = new Label(isOnline ? "Online" : "Offline");
-            statusLabel.setFont(Font.font(12));
-            statusLabel.setTextFill(isOnline ? Color.web("#4ade80") : Color.web("#6b7280"));
-
-            info.getChildren().addAll(nameLabel, statusLabel);
-            
-            // Unread count badge (if needed)
-            Label unreadBadge = new Label("2");
-            unreadBadge.setFont(Font.font("System", FontWeight.BOLD, 11));
-            unreadBadge.setTextFill(Color.WHITE);
-            unreadBadge.setStyle("""
-                -fx-background-color: #ef4444;
-                -fx-background-radius: 10;
-                -fx-padding: 2 8;
-            """);
-            unreadBadge.setVisible(false); // Show when there are unread messages
-
-            cell.getChildren().addAll(avatarStack, info, unreadBadge);
-
-            setGraphic(cell);
-            setStyle("-fx-background-color: transparent; -fx-padding: 5;");
-            
-            // Hover effect
-            cell.setOnMouseEntered(e -> 
-                cell.setStyle(cell.getStyle() + "-fx-background-color: #262b40;")
-            );
-            cell.setOnMouseExited(e -> 
-                cell.setStyle(cell.getStyle().replace("-fx-background-color: #262b40;", ""))
-            );
+            // Close all audio call dialogs
+            if (audioCallDialogs != null) {
+                for (AudioCallDialog dialog : new ArrayList<>(audioCallDialogs.values())) {
+                    try {
+                        dialog.close();
+                    } catch (Exception e) {
+                        // Ignore
+                    }
+                }
+                audioCallDialogs.clear();
+            }
+        } catch (Exception e) {
+            System.err.println("⚠️ Error closing dialogs: " + e.getMessage());
         }
     }
-
+    
+    private void shutdownControllers() {
+        try {
+            // Shutdown with timeout to avoid hanging
+            Thread shutdownThread = new Thread(() -> {
+                try {
+                    if (chatController != null) {
+                        chatController.shutdown();
+                    }
+                    
+                    if (clientManager != null) {
+                        clientManager.shutdown();
+                    }
+                } catch (Exception e) {
+                    // Ignore errors during shutdown
+                    if (!isShuttingDown) {
+                        System.err.println("⚠️ Error shutting down controllers: " + e.getMessage());
+                    }
+                }
+            }, "ControllerShutdown");
+            
+            shutdownThread.setDaemon(true); // Don't prevent JVM exit
+            shutdownThread.start();
+            shutdownThread.join(500); // Wait max 500ms (reduced from 1000ms)
+            
+            if (shutdownThread.isAlive()) {
+                System.err.println("⚠️ Shutdown timeout, forcing exit");
+                shutdownThread.interrupt(); // Try to interrupt
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (Exception e) {
+            // Ignore - we're shutting down anyway
+        }
+    }
+    
     // ===== CORE FUNCTIONS =====
     private void loadFriendsWithStatus() {
         List<Users> friends = chatService.listFriends(currentUserId);
@@ -740,10 +1425,24 @@ public class ChatWindow {
     }
 
     private void startStatusRefreshTimer() {
-        javafx.animation.Timeline timeline = new javafx.animation.Timeline(
-            new javafx.animation.KeyFrame(javafx.util.Duration.seconds(5), e -> {
+        statusRefreshTimeline = new javafx.animation.Timeline(
+            new javafx.animation.KeyFrame(javafx.util.Duration.seconds(3), e -> {
+                // ✅ Skip if shutting down
+                if (isShuttingDown) {
+                    return;
+                }
+                
                 Platform.runLater(() -> {
-                    friendListView.refresh();
+                    // ✅ Skip if shutting down
+                    if (isShuttingDown) {
+                        return;
+                    }
+                    
+                    // ✅ Realtime update: Refresh all lists
+                    refreshOnlineUsers();
+                    refreshFriends();
+                    refreshGroups();
+                    
                     // Update current chat status if open
                     if (currentChatUser != null) {
                         boolean isOnline = isUserOnline(currentChatUser.getId());
@@ -753,8 +1452,64 @@ public class ChatWindow {
                 });
             })
         );
-        timeline.setCycleCount(javafx.animation.Timeline.INDEFINITE);
-        timeline.play();
+        statusRefreshTimeline.setCycleCount(javafx.animation.Timeline.INDEFINITE);
+        statusRefreshTimeline.play();
+    }
+    
+    // ✅ Realtime refresh methods
+    private void refreshOnlineUsers() {
+        if (isShuttingDown) return;
+        
+        if (clientManager != null && onlineListView != null) {
+            try {
+                List<PeerInfo> onlinePeers = clientManager.getOnlinePeers();
+                // Filter out current user
+                onlinePeers = onlinePeers.stream()
+                    .filter(p -> !p.getUserId().equals(currentUserId))
+                    .toList();
+                onlineListView.getItems().setAll(onlinePeers);
+            } catch (Exception e) {
+                // Ignore errors during shutdown
+                if (!isShuttingDown) {
+                    System.err.println("⚠️ Error refreshing online users: " + e.getMessage());
+                }
+            }
+        }
+    }
+    
+    private void refreshFriends() {
+        if (isShuttingDown) return;
+        
+        if (friendListView != null) {
+            try {
+                List<Users> friends = chatService.listFriends(currentUserId);
+                friendListView.getItems().setAll(friends);
+                friendListView.refresh(); // Force cell update for status indicators
+            } catch (Exception e) {
+                // Ignore errors during shutdown
+                if (!isShuttingDown) {
+                    System.err.println("⚠️ Error refreshing friends: " + e.getMessage());
+                }
+            }
+        }
+    }
+    
+    private void refreshGroups() {
+        if (isShuttingDown) return;
+        
+        if (groupListView != null) {
+            try {
+                List<Conversation> groups = chatService.listConversationsByUser(currentUserId).stream()
+                    .filter(c -> c.getType() == Conversation.ConversationType.group)
+                    .toList();
+                groupListView.getItems().setAll(groups);
+            } catch (Exception e) {
+                // Ignore errors during shutdown
+                if (!isShuttingDown) {
+                    System.err.println("⚠️ Error refreshing groups: " + e.getMessage());
+                }
+            }
+        }
     }
 
     // ===== P2P LISTENERS =====

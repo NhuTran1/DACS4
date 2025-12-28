@@ -185,7 +185,57 @@ public class ConversationDao {
 		}
 	}
 	
-	//7.Delete conversation
+	//7. Create group conversation
+	public Conversation createGroupConversation(String groupName, List<Integer> memberIds) {
+		Transaction tx = null;
+		
+		try(Session session = HibernateUtil.getSessionFactory().openSession()){
+			tx = session.beginTransaction();
+			
+			// Validate: Group needs at least 3 members (including creator)
+			if (memberIds == null || memberIds.size() < 3) {
+				tx.rollback();
+				return null;
+			}
+			
+			// Get creator (first member)
+			Users creator = session.get(Users.class, memberIds.get(0));
+			if (creator == null) {
+				tx.rollback();
+				return null;
+			}
+			
+			// Create group conversation
+			Conversation conv = new Conversation();
+			conv.setType(ConversationType.group);
+			conv.setName(groupName);
+			conv.setCreatedBy(creator);
+			conv.setCreatedAt(LocalDateTime.now());
+			conv.setUpdatedAt(LocalDateTime.now());
+			session.save(conv);
+			
+			// Add all participants
+			for (Integer userId : memberIds) {
+				Users user = session.get(Users.class, userId);
+				if (user != null) {
+					Participant p = new Participant();
+					p.setConversation(conv);
+					p.setUser(user);
+					p.setJoinedAt(LocalDateTime.now());
+					session.save(p);
+				}
+			}
+			
+			tx.commit();
+			return conv;
+		} catch (Exception e) {
+			if (tx != null) tx.rollback();
+			e.printStackTrace();
+			return null;
+		}
+	}
+	
+	//8.Delete conversation
 //	public boolean deleteConversation(Long conversationId, Long requestId) {
 //		Transaction tx = null;
 //		

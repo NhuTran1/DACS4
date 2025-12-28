@@ -1,5 +1,6 @@
 C:\Users\ASUS\eclipse-workspace\chat\src\main\java\view\RegisterWindow.java
 C:\Users\ASUS\eclipse-workspace\chat\src\main\java\model\Friend.java
+C:\Users\ASUS\eclipse-workspace\chat\src\main\java\util\FileChecksumUtil.java
 C:\Users\ASUS\eclipse-workspace\chat\src\main\java\view\components\GlassCard.java
 C:\Users\ASUS\eclipse-workspace\chat\src\main\java\model\UserSession.java
 C:\Users\ASUS\eclipse-workspace\chat\src\main\java\view\ChatWindow.java
@@ -13,6 +14,7 @@ C:\Users\ASUS\eclipse-workspace\chat\src\main\java\dao\MessageDao.java
 C:\Users\ASUS\eclipse-workspace\chat\src\main\java\network\tcp\TcpWriterThread.java
 C:\Users\ASUS\eclipse-workspace\chat\src\main\java\network\p2p\PeerInfo.java
 C:\Users\ASUS\eclipse-workspace\chat\src\main\java\view\components\AnimatedBackground.java
+C:\Users\ASUS\eclipse-workspace\chat\src\main\java\controller\FileTransferController.java
 C:\Users\ASUS\eclipse-workspace\chat\src\main\java\network\tcp\TcpClient.java
 C:\Users\ASUS\eclipse-workspace\chat\src\main\java\network\tcp\TcpConnection.java
 C:\Users\ASUS\eclipse-workspace\chat\src\main\java\network\signaling\SignalingClient.java
@@ -21,9 +23,11 @@ C:\Users\ASUS\eclipse-workspace\chat\src\main\java\network\p2p\PeerConnection.ja
 C:\Users\ASUS\eclipse-workspace\chat\src\main\java\service\UserService.java
 C:\Users\ASUS\eclipse-workspace\chat\src\main\java\view\LoginWindow.java
 C:\Users\ASUS\eclipse-workspace\chat\src\main\java\model\UnreadCount.java
+C:\Users\ASUS\eclipse-workspace\chat\src\main\java\service\FileRetryService.java
 C:\Users\ASUS\eclipse-workspace\chat\src\main\java\dao\UserDao.java
 C:\Users\ASUS\eclipse-workspace\chat\src\main\java\protocol\P2PMessageProtocol.java
 C:\Users\ASUS\eclipse-workspace\chat\src\main\java\service\ConversationService.java
+C:\Users\ASUS\eclipse-workspace\chat\src\main\java\service\MessageRetryService.java
 C:\Users\ASUS\eclipse-workspace\chat\src\main\java\client\ChatClientMain.java
 C:\Users\ASUS\eclipse-workspace\chat\src\main\java\controller\RegisterController.java
 C:\Users\ASUS\eclipse-workspace\chat\src\main\java\model\FriendRequest.java
@@ -35,10 +39,12 @@ C:\Users\ASUS\eclipse-workspace\chat\src\main\java\service\ChatService.java
 C:\Users\ASUS\eclipse-workspace\chat\src\main\java\config\HibernateUtil.java
 C:\Users\ASUS\eclipse-workspace\chat\src\main\java\service\FriendService.java
 C:\Users\ASUS\eclipse-workspace\chat\src\main\java\test\P2PClient.java
+C:\Users\ASUS\eclipse-workspace\chat\src\main\java\model\FileAttachment.java
 C:\Users\ASUS\eclipse-workspace\chat\src\main\java\model\Conversation.java
 C:\Users\ASUS\eclipse-workspace\chat\src\main\java\controller\LoginController.java
 C:\Users\ASUS\eclipse-workspace\chat\src\main\java\dao\ConversationDao.java
 C:\Users\ASUS\eclipse-workspace\chat\src\main\java\service\MessageService.java
+C:\Users\ASUS\eclipse-workspace\chat\src\main\java\dao\FileAttachmentDao.java
 C:\Users\ASUS\eclipse-workspace\chat\src\main\java\network\p2p\PeerDiscoveryService.java
 C:\Users\ASUS\eclipse-workspace\chat\src\main\java\test\P2PServer.java
 C:\Users\ASUS\eclipse-workspace\chat\src\main\java\network\p2p\P2PManager.java

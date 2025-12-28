@@ -9,6 +9,7 @@ import dao.UserDao;
 import model.Users;
 
 import java.util.Random;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -217,7 +218,8 @@ public class ClientManager {
     * Danh sách peers hiện tại đang online
     */
    public List<PeerInfo> getOnlinePeers() {
-       return discoveryService.getOnlinePeersForUser(userId);
+         return discoveryService.getAllPeers();
+       //return discoveryService.getOnlinePeersForUser(userId);
    }
    
    /**

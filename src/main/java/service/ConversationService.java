@@ -39,6 +39,14 @@ public class ConversationService {
         return conversationDao.updateConversation(conversationId, newName, requestUserId);
     }
     
+    // Tạo group conversation với nhiều thành viên (tối thiểu 3 người)
+    public Conversation createGroupConversation(String groupName, List<Integer> memberIds) {
+        if (memberIds == null || memberIds.size() < 3) {
+            return null; // Group needs at least 3 members
+        }
+        return conversationDao.createGroupConversation(groupName, memberIds);
+    }
+    
     // public boolean deleteConversation(Integer conversationId, Integer requestUserId) {
     //     return conversationDao.deleteConversation(conversationId, requestUserId);
     // }

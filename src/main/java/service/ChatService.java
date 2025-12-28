@@ -87,6 +87,10 @@ public class ChatService {
         return conversationService.updateConversationName(conversationId, newName, requestUserId);
     }
     
+    public Conversation createGroupConversation(String groupName, List<Integer> memberIds) {
+        return conversationService.createGroupConversation(groupName, memberIds);
+    }
+    
     /**
      * Gửi tin nhắn với clientMessageId (Idempotent)
      * Đây là method chính để gửi tin nhắn
