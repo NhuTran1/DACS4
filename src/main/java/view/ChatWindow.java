@@ -1436,8 +1436,7 @@ public class ChatWindow {
     }
 
     // Check if message has file attachment
-    if (msg.getImageUrl() != null && msg.getImageUrl().startsWith("file://")) {
-        // This is a file message
+    if (msg.getMessageType() == Message.MessageType.FILE) {
         VBox fileBox = createFileMessageBox(msg, isOwn);
         bubble.getChildren().add(fileBox);
     } else {
@@ -1759,12 +1758,14 @@ public class ChatWindow {
 
     	        @Override
     	        public void onFileProgress(String fileId, int progress, boolean isUpload) {
-    	        	 Platform.runLater(() -> {
-    	        	        if (!fileProgressDialogs.containsKey(fileId)) {
-    	        	            showFileProgressDialog(fileId, "Sending file...", isUpload);
-    	        	        }
-    	        	        updateFileProgress(fileId, progress);
-    	        	    });
+    	            Platform.runLater(() -> {
+    	                // Hiển thị hoặc update progress dialog
+    	                if (!fileProgressDialogs.containsKey(fileId)) {
+    	                    String title = isUpload ? "Sending file..." : "Receiving file...";
+    	                    showFileProgressDialog(fileId, title, isUpload);
+    	                }
+    	                updateFileProgress(fileId, progress);
+    	            });
     	        }
 
     	        @Override
@@ -1772,47 +1773,26 @@ public class ChatWindow {
     	            Platform.runLater(() -> {
     	                closeFileProgressDialog(fileId);
 
-    	             // ================== SENDER ==================
+    	                // ===== SENDER =====
     	                if (isUpload) {
-    	                	File originalFile = pendingUploadFiles.remove(fileId);
+    	                    File originalFile = pendingUploadFiles.remove(fileId);
 
     	                    if (originalFile == null) {
-    	                        System.err.println("❌ SENDER: originalFile not found for fileId=" + fileId);
+    	                        System.err.println("❌ SENDER: originalFile not found");
     	                        return;
     	                    }
     	                    
-//    	                    Message msg = chatService.createFileMessage(
-//    	                            currentConversation.getId(),
-//    	                            currentUserId,
-//    	                            originalFile.getName(),
-//    	                            "file://" + originalFile.getName() + "|" +
-//    	                            formatFileSize(originalFile.length())
-//    	                        );
-//
-//    	                    try {
-//								chatService.createFileAttachment(
-//								    msg,
-//								    currentUserId,
-//								    file,
-//								    fileId
-//								);
-//							} catch (IOException e) {
-//								// TODO Auto-generated catch block
-//								e.printStackTrace();
-//							}
-
-    	                 // UI chỉ nhận callback
-    	                    //displayFileMessage(msg);
+    	                    // ✅ Hiển thị thông báo thành công
+    	                    showSuccessNotification("✅ File sent: " + originalFile.getName());
     	                    
-    	                    showSuccessNotification("File sent successfully!");
+    	                    // ✅ Reload messages để hiển thị
     	                    reloadCurrentConversationMessages();
     	                    return;
     	                }
 
-    	                //phía receiver 
+    	                // ===== RECEIVER =====
     	                if (file == null) {
     	                    showAlert("Error", "File received but file object is null");
-    	                    System.err.println("❌ onFileComplete: file is null, fileId=" + fileId);
     	                    return;
     	                }
 
@@ -1821,38 +1801,35 @@ public class ChatWindow {
     	                    return;
     	                }
     	                
-                        // ✅ RECEIVER: File đã được nhận và message đã được tạo trong FileTransferController
-                        showSuccessNotification("File received: " + (file != null ? file.getName() : "file"));
-                        System.out.println("✅ [ChatWindow] RECEIVER: File received notification");
-                        
-                        // ✅ Reload messages để đảm bảo message hiển thị (ngay cả khi conversation đang mở)
-                        if (currentConversation != null) {
-                            // Delay nhỏ để đảm bảo DB đã commit
-                            new Thread(() -> {
-                                try {
-                                    Thread.sleep(200); // Đợi 200ms để DB commit
-                                    Platform.runLater(() -> {
-                                        if (currentConversation != null) {
-                                            reloadCurrentConversationMessages();
-                                            System.out.println("✅ [ChatWindow] RECEIVER: Reloaded messages after file receive");
-                                        }
-                                    });
-                                } catch (InterruptedException e) {
-                                    Thread.currentThread().interrupt();
-                                }
-                            }).start();
-                        } else {
-                            System.out.println("✅ [ChatWindow] RECEIVER: File received but conversation not open. Message saved to DB.");
-                        }
+    	                // ✅ Hiển thị thông báo file nhận thành công
+    	                showSuccessNotification("✅ File received: " + file.getName());
+    	                System.out.println("✅ File saved to: " + file.getAbsolutePath());
+    	                
+    	                // ✅ Reload messages để hiển thị
+    	                if (currentConversation != null) {
+    	                    // Delay nhỏ để đảm bảo DB đã commit
+    	                    new Thread(() -> {
+    	                        try {
+    	                            Thread.sleep(300);
+    	                            Platform.runLater(() -> {
+    	                                if (currentConversation != null) {
+    	                                    reloadCurrentConversationMessages();
+    	                                }
+    	                            });
+    	                        } catch (InterruptedException e) {
+    	                            Thread.currentThread().interrupt();
+    	                        }
+    	                    }).start();
+    	                }
     	            });
     	        }
-
 
     	        @Override
     	        public void onFileCanceled(String fileId, boolean isUpload) {
     	            Platform.runLater(() -> {
     	                closeFileProgressDialog(fileId);
-    	                showAlert("Canceled", "File transfer was canceled");
+    	                String msg = isUpload ? "File sending canceled" : "File receiving canceled";
+    	                showAlert("Canceled", msg);
     	            });
     	        }
 
@@ -2456,6 +2433,67 @@ private class AudioCallDialog extends Stage {
                 timer.play();
             }
         });
+    }
+    
+ // ===== HELPER METHOD: Reload messages =====
+    private void reloadCurrentConversationMessages() {
+        if (currentConversation == null) return;
+        
+        // Clear and reload
+        messageArea.getChildren().clear();
+        List<Message> messages = chatService.listMessages(currentConversation.getId());
+        
+        for (Message msg : messages) {
+            boolean isOwn = msg.getSender().getId().equals(currentUserId);
+            displayMessage(msg, isOwn);
+            
+            // Auto mark as seen if not own message
+            if (!isOwn && msg.getStatus() != Message.MessageStatus.DELIVERED) {
+                chatController.markMessageAsSeen(msg.getId());
+            }
+        }
+        
+        System.out.println("✅ Reloaded " + messages.size() + " messages");
+    }
+
+    // ===== HELPER METHOD: Show success notification =====
+    private void showSuccessNotification(String message) {
+        Label notification = new Label(message);
+        notification.setStyle("""
+            -fx-background-color: rgba(74, 222, 128, 0.9);
+            -fx-text-fill: white;
+            -fx-padding: 12 20;
+            -fx-background-radius: 10;
+            -fx-font-size: 14;
+            -fx-font-weight: bold;
+        """);
+        
+        StackPane notificationPane = new StackPane(notification);
+        notificationPane.setStyle("-fx-background-color: transparent;");
+        StackPane.setAlignment(notification, Pos.TOP_CENTER);
+        StackPane.setMargin(notification, new Insets(20, 0, 0, 0));
+        
+        // Add to stage
+        if (stage.getScene().getRoot() instanceof BorderPane) {
+            BorderPane root = (BorderPane) stage.getScene().getRoot();
+            StackPane overlay = new StackPane(notificationPane);
+            
+            // Temporarily add overlay
+            if (root.getParent() instanceof StackPane) {
+                ((StackPane) root.getParent()).getChildren().add(overlay);
+            }
+            
+            // Fade out after 3 seconds
+            FadeTransition fade = new FadeTransition(Duration.seconds(3), notificationPane);
+            fade.setFromValue(1.0);
+            fade.setToValue(0.0);
+            fade.setOnFinished(e -> {
+                if (root.getParent() instanceof StackPane) {
+                    ((StackPane) root.getParent()).getChildren().remove(overlay);
+                }
+            });
+            fade.play();
+        }
     }
     
     private void updateTimer() {

@@ -1,7 +1,5 @@
 package network.p2p;
 
-import util.FileChecksumUtil;
-
 import protocol.P2PMessageProtocol;
 
 import java.io.*;
@@ -9,13 +7,14 @@ import java.util.*;
 import java.util.concurrent.*;
 
 /**
- * - Chia file thành chunks
- * - Gửi trực tiếp qua TCP
- * - Hỗ trợ idempotent với clientMessageId
+ * FileTransferManager - Simplified version
+ * - No ACK/NACK
+ * - No checksum verification
+ * - Direct chunk sending
  */
 public class FileTransferManager {
     
-    private static final int CHUNK_SIZE = 32 * 1024; // 32KB per chunk
+    private static final int CHUNK_SIZE = 8 * 1024; // 8KB per chunk
     
     // Map: fileId -> FileTransfer
     private final Map<String, OutgoingTransfer> outgoingTransfers = new ConcurrentHashMap<>();
@@ -41,19 +40,18 @@ public class FileTransferManager {
     // ===== OUTGOING FILE TRANSFER =====
     
     /**
-     * Gửi file trực tiếp (không cần request/accept)
+     * Gửi file trực tiếp (không cần ACK/NACK)
      */
     public String sendFile(Integer toUserId, File file, Integer conversationId, 
                           String clientMessageId, String fileId) throws IOException {
-    	 if (file == null || !file.exists() || !file.isFile()) {
-    	        System.err.println("❌ File not found: " + file);
-    	        if (listener != null) {
-    	            listener.onFileError(fileId, "File not found");
-    	        }
-    	        return null; // ❌ KHÔNG THROW
-    	    }
+        if (file == null || !file.exists() || !file.isFile()) {
+            System.err.println("❌ File not found: " + file);
+            if (listener != null) {
+                listener.onFileError(fileId, "File not found");
+            }
+            return null;
+        }
 
-//        String fileId = UUID.randomUUID().toString();
         String fileName = file.getName();
         Long fileSize = file.length();
 
@@ -71,13 +69,12 @@ public class FileTransferManager {
     }
 
     /**
-     * Gửi file thành từng chunks (đã fix)
-     * - Đảm bảo file gửi là file đã copy vào UPLOAD_DIR
-     * - Dùng BufferedInputStream để đọc nhanh & ổn định
-     * - Tính checksum 1 lần duy nhất
+     * Gửi file thành từng chunks - Đơn giản hóa
+     * - Không tính checksum
+     * - Không đợi ACK
+     * - Gửi xong là xong
      */
     private void sendFileChunks(OutgoingTransfer transfer) {
-        // ✅ Đảm bảo gửi đúng file đã được copy vào uploads
         File fileToSend = transfer.file;
 
         if (fileToSend == null || !fileToSend.exists() || !fileToSend.isFile()) {
@@ -91,9 +88,6 @@ public class FileTransferManager {
         }
 
         try {
-            // ✅ Tính checksum 1 lần
-            transfer.checksum = FileChecksumUtil.sha256(fileToSend);
-
             long fileSize = fileToSend.length();
             int totalChunks = (int) Math.ceil((double) fileSize / CHUNK_SIZE);
             int chunkIndex = 0;
@@ -102,9 +96,7 @@ public class FileTransferManager {
             System.out.println("   - File: " + fileToSend.getName());
             System.out.println("   - Size: " + formatSize(fileSize));
             System.out.println("   - Total chunks: " + totalChunks);
-            System.out.println("   - Checksum: " + transfer.checksum.substring(0, 16) + "...");
 
-            // ✅ Dùng BufferedInputStream để đọc ổn định
             try (BufferedInputStream bis =
                          new BufferedInputStream(new FileInputStream(fileToSend))) {
 
@@ -116,6 +108,7 @@ public class FileTransferManager {
 
                     byte[] chunk = Arrays.copyOf(buffer, bytesRead);
 
+                    // ✅ Gửi chunk - không checksum
                     String json = P2PMessageProtocol.buildFileChunk(
                             p2pManager.getLocalUserId(),
                             transfer.toUserId,
@@ -126,8 +119,7 @@ public class FileTransferManager {
                             fileToSend.getName(),
                             fileSize,
                             transfer.conversationId,
-                            transfer.clientMessageId,
-                            transfer.checksum
+                            transfer.clientMessageId
                     );
 
                     PeerConnection conn = p2pManager.getConnection(transfer.toUserId);
@@ -145,13 +137,14 @@ public class FileTransferManager {
 
                     chunkIndex++;
 
+                    // ✅ Update progress
                     int progress = (int) ((chunkIndex * 100.0) / totalChunks);
                     if (listener != null) {
                         listener.onFileProgress(transfer.fileId, progress, true);
                     }
 
-                    // ✅ Nhẹ nhàng với network
-                    Thread.sleep(10);
+                    // Delay nhẹ để không quá tải network
+                    Thread.sleep(5);
                 }
             }
 
@@ -170,6 +163,11 @@ public class FileTransferManager {
 
                 transfer.status = TransferStatus.COMPLETED;
                 System.out.println("✅ File sent successfully: " + fileToSend.getName());
+                
+                // ✅ Notify completion
+                if (listener != null) {
+                    listener.onFileComplete(transfer.fileId, fileToSend, true);
+                }
             }
 
         } catch (Exception e) {
@@ -184,7 +182,6 @@ public class FileTransferManager {
             outgoingTransfers.remove(transfer.fileId);
         }
     }
-
 
     /**
      * Hủy việc gửi file
@@ -213,22 +210,10 @@ public class FileTransferManager {
         }
     }
 
-    // ===== INCOMING FILE TRANSFER =====
-    
-    /**
-     * Xử lý file chunk nhận được
-     * Delegate to FileTransferController for actual file handling
-     */
-    public void handleFileChunk(P2PMessageProtocol.Message msg) {
-        // This is now handled by FileTransferController
-        // P2PManager will forward to FileTransferController
-    }
-
     /**
      * Xử lý file complete
      */
     public void handleFileComplete(String fileId) {
-        // Handled by FileTransferController
         if (listener != null) {
             listener.onFileComplete(fileId, null, false);
         }
@@ -252,7 +237,6 @@ public class FileTransferManager {
     }
 
     public void shutdown() {
-        // Cancel all ongoing transfers
         outgoingTransfers.values().forEach(t -> t.status = TransferStatus.CANCELED);
         outgoingTransfers.clear();
     }
@@ -270,7 +254,6 @@ public class FileTransferManager {
         Integer conversationId;
         String clientMessageId;
         TransferStatus status = TransferStatus.SENDING;
-        String checksum;
         
         OutgoingTransfer(String fileId, File file, Integer toUserId, 
                         Integer conversationId, String clientMessageId) {

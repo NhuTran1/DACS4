@@ -6,6 +6,11 @@ import java.nio.file.Files;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
+import org.hibernate.Session;
+import org.hibernate.SessionFactory;
+import org.hibernate.Transaction;
+
+import org.hibernate.Transaction;
 
 import dao.ConversationDao;
 import dao.FileAttachmentDao;
@@ -24,7 +29,8 @@ public class MessageService {
     private ConversationDao conversationDao = new ConversationDao();
     private UserDao userDao = new UserDao();
     private FileAttachmentDao fileAttachmentDao = new FileAttachmentDao();
-    
+    private SessionFactory sessionFactory;
+
     // ===== IDEMPOTENT MESSAGE SENDING =====
     
     /**
@@ -351,48 +357,54 @@ public class MessageService {
     }
     
     public Message createFileMessageWithAttachment(
-            Integer conversationId,
-            Integer senderId,
-            File file,
-            String fileId
-    ) throws IOException {
-    	
-//    	if (file == null || !file.exists()) {
-//            throw new IllegalArgumentException(
-//                "createFileMessageWithAttachment: file is null or not exists"
-//            );
-//        }
-    	
-        // 1. Create Message (SAVE TRƯỚC)
-        Message msg = new Message();
-        msg.setConversation(conversationDao.getConversation(conversationId));
-        msg.setSender(userDao.findById(senderId));
-        msg.setMessageType(Message.MessageType.FILE);
-        msg.setContent("[File] " + file.getName());
-        msg.setStatus(Message.MessageStatus.SENT);
+    	    Integer conversationId,
+    	    Integer senderId,
+    	    File file,
+    	    String fileId
+    	) throws IOException {
+    	    
+    	    // Đảm bảo chạy trong 1 Transaction (Hibernate Session)
+    	    Session session = sessionFactory.getCurrentSession(); 
+    	    Transaction tx = null;
+    	    try {
+    	        tx = session.beginTransaction();
 
-        messageDao.saveMessage(msg); // ⚠️ bắt buộc
+    	        // 1️⃣ Tạo Message
+    	        Message msg = new Message();
+    	        msg.setConversation(conversationDao.getConversation(conversationId));
+    	        msg.setSender(userDao.findById(senderId));
+    	        msg.setMessageType(Message.MessageType.FILE);
+    	        msg.setContent("[File] " + file.getName());
+    	        msg.setStatus(Message.MessageStatus.SENT);
 
-        // 2. Create FileAttachment
-        FileAttachment fa = new FileAttachment();
-        fa.setMessage(msg);
-        fa.setSender(msg.getSender());
-        fa.setFileId(fileId);
-        fa.setFileName(file.getName());
-        fa.setFilePath(file.getAbsolutePath());
-        fa.setFileSize(file.length());
-        fa.setMimeType(Files.probeContentType(file.toPath()));
-        fa.setStatus(FileAttachment.FileStatus.COMPLETED);
+    	        session.save(msg); // Lưu message lấy ID
 
-        fileAttachmentDao.save(fa);
+    	        // 2️⃣ Tạo FileAttachment
+    	        FileAttachment fa = new FileAttachment();
+    	        fa.setMessage(msg);
+    	        fa.setSender(msg.getSender());
+    	        fa.setFileId(fileId);
+    	        fa.setFileName(file.getName());
+    	        fa.setFilePath(file.getAbsolutePath()); // Đường dẫn tuyệt đối cục bộ
+    	        fa.setFileSize(file.length());
+    	        fa.setMimeType(Files.probeContentType(file.toPath()));
+    	        fa.setStatus(FileAttachment.FileStatus.COMPLETED);
 
-        // 3. Link ngược (khuyến nghị)
-        msg.setFileAttachment(fa);
-        messageDao.update(msg);
+    	        session.save(fa);
 
-        
-        return msg;
-    }
+    	        // 3️⃣ Liên kết và Flush
+    	        msg.setFileAttachment(fa);
+    	        session.update(msg);
+    	        
+    	        session.flush(); // ⚡ Ép Hibernate ghi xuống DB ngay lập tức
+    	        tx.commit();     // Chốt dữ liệu
+    	        
+    	        return msg;
+    	    } catch (Exception e) {
+    	        if (tx != null) tx.rollback();
+    	        throw e;
+    	    }
+    	}
 
     //chi lưu thôi ko đụng đến P2P
     public FileAttachment saveFileMessageAndAttachment(

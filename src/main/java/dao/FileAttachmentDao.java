@@ -381,22 +381,22 @@ public class FileAttachmentDao {
      * ✅ Tìm file attachment theo messageId
      */
     public FileAttachment findByMessageId(Integer messageId) {
-        try (Session session = HibernateUtil.getSessionFactory().openSession()) {
+        Session session = HibernateUtil.getSessionFactory().openSession();
+        try {
             String sql = """
                 SELECT *
                 FROM file_attachment
-                WHERE message_id = :messageId
+                WHERE message_id = :msgId
                 LIMIT 1
-                """;
-            
-            Query<FileAttachment> query = session.createNativeQuery(sql, FileAttachment.class);
-            query.setParameter("messageId", messageId);
-            
-            List<FileAttachment> results = query.getResultList();
-            return results.isEmpty() ? null : results.get(0);
-        } catch (Exception e) {
-            System.err.println("❌ Error finding FileAttachment by messageId: " + e.getMessage());
-            return null;
+            """;
+
+            return session
+                    .createNativeQuery(sql, FileAttachment.class) // ⭐ map entity
+                    .setParameter("msgId", messageId)
+                    .uniqueResult();
+        } finally {
+            session.close();
         }
     }
+
 }

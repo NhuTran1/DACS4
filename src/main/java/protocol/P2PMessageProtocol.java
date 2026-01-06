@@ -8,43 +8,43 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * P2P Message Protocol with Idempotent support (clientMessageId)
+ * P2P Message Protocol - Simplified
+ * - No FILE_ACK/FILE_NACK
+ * - No checksum in messages
  */
 public class P2PMessageProtocol {
     private static final Gson gson = new Gson();
 
     // Message types
     public enum MessageType {
-        CHAT_MESSAGE,      // Tin nhắn chat thông thường
-        TYPING_START,      // Bắt đầu typing
-        TYPING_STOP,       // Dừng typing
+        CHAT_MESSAGE,
+        TYPING_START,
+        TYPING_STOP,
         
         MESSAGE_ACK,       
         MESSAGE_SEEN_ACK,
         
-        // File transfer - Simplified (no request/accept/reject)
+        // File transfer - Simplified
         FILE_CHUNK,        // Chunk của file
         FILE_COMPLETE,     // File đã gửi xong
         FILE_CANCEL,       // Hủy việc gửi file
-        FILE_ACK,        // ✅ NEW: ACK từ receiver
-        FILE_NACK,       // ✅ NEW: NACK từ receiver (failed)
         
         // Audio/Voice call
-        AUDIO_REQUEST,     // Yêu cầu bắt đầu voice call
-        AUDIO_ACCEPT,      // Chấp nhận voice call
-        AUDIO_REJECT,      // Từ chối voice call
-        AUDIO_DATA,        // Audio data chunk (streaming)
-        AUDIO_END,         // Kết thúc voice call
+        AUDIO_REQUEST,
+        AUDIO_ACCEPT,
+        AUDIO_REJECT,
+        AUDIO_DATA,
+        AUDIO_END,
         
-        // WebRTC signaling (video call)
-        CALL_OFFER,        // WebRTC offer
-        CALL_ANSWER,       // WebRTC answer
-        CALL_ICE,          // ICE candidate
-        CALL_HANGUP,       // Kết thúc cuộc gọi
+        // WebRTC signaling
+        CALL_OFFER,
+        CALL_ANSWER,
+        CALL_ICE,
+        CALL_HANGUP,
         
-        MESSAGE_SEEN,      // Đánh dấu đã đọc
-        PING,              // Kiểm tra kết nối
-        PONG               // Phản hồi ping
+        MESSAGE_SEEN,
+        PING,
+        PONG
     }
 
     // ===== MAIN PROTOCOL CLASS =====
@@ -62,12 +62,10 @@ public class P2PMessageProtocol {
         }
     }
 
-    // ===== CHAT MESSAGES - WITH IDEMPOTENT =====
+    // ===== CHAT MESSAGES =====
     
-    /**
-     * Build chat message với clientMessageId (Idempotent)
-     */
-    public static String buildChatMessage(Integer from, Integer conversationId, String content, String clientMessageId) {
+    public static String buildChatMessage(Integer from, Integer conversationId, 
+                                         String content, String clientMessageId) {
         Message msg = new Message();
         msg.type = MessageType.CHAT_MESSAGE.name();
         msg.from = from;
@@ -84,13 +82,6 @@ public class P2PMessageProtocol {
         msg.to = to;
         msg.data.put("clientMessageId", clientMessageId);
         return gson.toJson(msg);
-    }
-    
-    /**
-     * Legacy wrapper (không có clientMessageId)
-     */
-    public static String buildChatMessage(Integer from, Integer conversationId, String content) {
-        return buildChatMessage(from, conversationId, content, java.util.UUID.randomUUID().toString());
     }
 
     public static String buildTypingStart(Integer from, Integer conversationId) {
@@ -109,10 +100,10 @@ public class P2PMessageProtocol {
         return gson.toJson(msg);
     }
 
-    // ===== FILE TRANSFER MESSAGES - SIMPLIFIED WITH IDEMPOTENT =====
+    // ===== FILE TRANSFER - SIMPLIFIED =====
     
     /**
-     * Gửi chunk của file với metadata trong chunk đầu tiên
+     * Gửi chunk của file - đơn giản hóa (không có checksum)
      */
     public static String buildFileChunk(
             Integer from,
@@ -124,8 +115,7 @@ public class P2PMessageProtocol {
             String fileName,
             long fileSize,
             Integer conversationId,
-            String clientMessageId,
-            String checksum
+            String clientMessageId
     ) {
         Message msg = new Message();
         msg.type = MessageType.FILE_CHUNK.name();
@@ -135,21 +125,18 @@ public class P2PMessageProtocol {
         msg.data.put("fileId", fileId);
         msg.data.put("chunkIndex", chunkIndex);
         msg.data.put("totalChunks", totalChunks);
-        msg.data.put("chunkData",
-                Base64.getEncoder().encodeToString(chunkData));
+        msg.data.put("chunkData", Base64.getEncoder().encodeToString(chunkData));
 
-        // ✅ Metadata chỉ gửi ở chunk đầu
+        // Metadata chỉ gửi ở chunk đầu
         if (chunkIndex == 0) {
             msg.data.put("fileName", fileName);
             msg.data.put("fileSize", fileSize);
             msg.data.put("conversationId", conversationId);
             msg.data.put("clientMessageId", clientMessageId);
-            msg.data.put("checksum", checksum);
         }
 
         return gson.toJson(msg);
     }
-
 
     /**
      * File đã gửi xong
@@ -174,37 +161,9 @@ public class P2PMessageProtocol {
         msg.data.put("fileId", fileId);
         return gson.toJson(msg);
     }
-    
-    /**
-     * ✅ Build FILE_ACK - xác nhận đã nhận file thành công
-     */
-    public static String buildFileAck(Integer from, Integer to, String fileId) {
-        Message msg = new Message();
-        msg.type = MessageType.FILE_ACK.name();
-        msg.from = from;
-        msg.to = to;
-        msg.data.put("fileId", fileId);
-        return gson.toJson(msg);
-    }
 
-    /**
-     * ✅ Build FILE_NACK - báo lỗi khi nhận file
-     */
-    public static String buildFileNack(Integer from, Integer to, String fileId, String reason) {
-        Message msg = new Message();
-        msg.type = MessageType.FILE_NACK.name();
-        msg.from = from;
-        msg.to = to;
-        msg.data.put("fileId", fileId);
-        msg.data.put("reason", reason);
-        return gson.toJson(msg);
-    }
-
-    // ===== AUDIO/VOICE CALL MESSAGES =====
+    // ===== AUDIO/VOICE CALL =====
     
-    /**
-     * Yêu cầu bắt đầu voice call
-     */
     public static String buildAudioRequest(Integer from, Integer to, String callId) {
         Message msg = new Message();
         msg.type = MessageType.AUDIO_REQUEST.name();
@@ -214,9 +173,6 @@ public class P2PMessageProtocol {
         return gson.toJson(msg);
     }
 
-    /**
-     * Chấp nhận voice call
-     */
     public static String buildAudioAccept(Integer from, Integer to, String callId, int udpPort) {
         Message msg = new Message();
         msg.type = MessageType.AUDIO_ACCEPT.name();
@@ -227,9 +183,6 @@ public class P2PMessageProtocol {
         return gson.toJson(msg);
     }
 
-    /**
-     * Từ chối voice call
-     */
     public static String buildAudioReject(Integer from, Integer to, String callId, String reason) {
         Message msg = new Message();
         msg.type = MessageType.AUDIO_REJECT.name();
@@ -240,9 +193,6 @@ public class P2PMessageProtocol {
         return gson.toJson(msg);
     }
 
-    /**
-     * Kết thúc voice call
-     */
     public static String buildAudioEnd(Integer from, Integer to, String callId) {
         Message msg = new Message();
         msg.type = MessageType.AUDIO_END.name();
