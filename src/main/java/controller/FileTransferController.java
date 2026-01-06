@@ -81,7 +81,8 @@ public class FileTransferController {
         Integer conversationId;
         Integer senderId;
         Integer receiverId;
-        String fileName;
+        String fileName; // Original filename
+        String finalFileName; // Final filename (may have timestamp if duplicate)
         Long fileSize;
         File sourceFile; // for upload
         String clientMessageId;
@@ -102,6 +103,7 @@ public class FileTransferController {
             this.fileSize = fileSize;
             this.clientMessageId = clientMessageId;
             this.isUpload = isUpload;
+            
         }
     }
 
@@ -112,6 +114,9 @@ public class FileTransferController {
         this.fileAttachmentDao = new FileAttachmentDao();
         this.chatController = chatController;
         
+        System.out.println("📂 Current Working Directory: " + System.getProperty("user.dir"));
+        System.out.println("📂 Expected Download Path: " + Paths.get(DOWNLOAD_DIR).toAbsolutePath());
+        
         initializeStorageDirectories();
     }
 
@@ -120,13 +125,15 @@ public class FileTransferController {
      */
     private void initializeStorageDirectories() {
         try {
-            Files.createDirectories(Paths.get(UPLOAD_DIR));
-            Files.createDirectories(Paths.get(DOWNLOAD_DIR));
-            System.out.println("✅ File storage directories initialized");
+            Files.createDirectories(Paths.get(STORAGE_BASE_DIR).toAbsolutePath());
+            Files.createDirectories(Paths.get(UPLOAD_DIR).toAbsolutePath());
+            Files.createDirectories(Paths.get(DOWNLOAD_DIR).toAbsolutePath());
+            System.out.println("✅ Storage initialized at: " + Paths.get(STORAGE_BASE_DIR).toAbsolutePath());
         } catch (IOException e) {
-            System.err.println("❌ Failed to create storage directories: " + e.getMessage());
+            System.err.println("❌ Critical: Could not create storage: " + e.getMessage());
         }
     }
+
 
     // ===== PUBLIC API =====
     
@@ -138,88 +145,128 @@ public class FileTransferController {
             notifyError(null, "File not found");
             return;
         }
-
+     // 1. Generate unique IDs
+        String fileId = UUID.randomUUID().toString();
+        String clientMessageId = UUID.randomUUID().toString();
+        
+        FileAttachment savedAttachment;
+        
+     // ===== STEP 1: SAVE DB (KHÔNG DÍNH P2P) =====
         try {
-            // 1. Generate unique IDs
-            String fileId = UUID.randomUUID().toString();
-            String clientMessageId = UUID.randomUUID().toString();
-            
-            // 2. Copy file to upload directory
-            String storedFileName = fileId + "_" + file.getName();
-            Path storagePath = Paths.get(UPLOAD_DIR, storedFileName);
-            Files.copy(file.toPath(), storagePath, StandardCopyOption.REPLACE_EXISTING);
-            
-            // 3. Calculate checksum BEFORE sending
-            String checksum = calculateChecksum(storagePath.toFile());
-            System.out.println("✅ File checksum calculated: " + checksum);
-            
-            // 4. Create message in DB (PENDING)
-            String fileUrl = "file://" + file.getName() + "|" + formatFileSize(file.length());
-            Message message = chatService.sendFileMessageIdempotent(
-                conversationId,
-                currentUserId,
-                file.getName(),
-                fileUrl,
-                clientMessageId
+            savedAttachment = chatService.saveFileMessageAndAttachment(
+                    conversationId,
+                    currentUserId,
+                    file,
+                    fileId,
+                    clientMessageId
             );
-            
-            if (message == null) {
-                System.err.println("❌ Failed to save file message");
-                notifyError(fileId, "Failed to save message to database");
-                return;
-            }
-            
-            // 5. Create file attachment metadata (UPLOADING status)
-            FileAttachment attachment = new FileAttachment();
-            attachment.setMessage(message);
-            attachment.setSender(chatService.getUserById(currentUserId));
-            attachment.setFileId(fileId);
-            attachment.setFileName(file.getName());
-            attachment.setFilePath(storagePath.toString());
-            attachment.setFileSize(file.length());
-            attachment.setMimeType(detectMimeType(file));
-            attachment.setStatus(FileStatus.UPLOADING);
-            attachment.setChecksum(checksum);
-            
-            FileAttachment savedAttachment = fileAttachmentDao.save(attachment);
-            
-            if (savedAttachment == null) {
-                System.err.println("❌ Failed to save file attachment");
-                notifyError(fileId, "Failed to save file metadata");
-                return;
-            }
-            
-            // 6. Track transfer context
-            FileTransferContext context = new FileTransferContext(
-                fileId, conversationId, currentUserId, toUserId,
-                file.getName(), file.length(), clientMessageId, true
-            );
-            context.sourceFile = storagePath.toFile();
-            context.checksum = checksum;
-            context.messageId = message.getId();
-            context.fileAttachmentId = savedAttachment.getId();
-            pendingTransfers.put(fileId, context);
-            
-            // 7. Send file via P2P (trực tiếp, không cần request/accept)
-            String p2pFileId = p2pManager.sendFile(
-                toUserId, 
-                storagePath.toFile(), 
-                conversationId, 
-                clientMessageId
-            );
-            
-            System.out.println("✅ File send initiated:");
-            System.out.println("   - FileId: " + fileId);
-            System.out.println("   - Message ID: " + message.getId());
-            System.out.println("   - Attachment ID: " + savedAttachment.getId());
-            System.out.println("   - Storage path: " + storagePath);
-            System.out.println("   - Checksum: " + checksum);
-            System.out.println("   - ClientMessageId: " + clientMessageId);
-            
         } catch (Exception e) {
-            notifyError(null, "Failed to send file: " + e.getMessage());
-            e.printStackTrace();
+            notifyError(fileId, "DB save failed: " + e.getMessage());
+            return;
         }
+
+     // ===== STEP 2: SEND P2P (ASYNC) =====
+        new Thread(() -> {
+            try {
+                p2pManager.sendFile(
+                    toUserId,
+                    file,
+                    conversationId,
+                    clientMessageId,      
+                    fileId
+                );
+            } catch (Exception e) {
+                // ❌ TUYỆT ĐỐI KHÔNG rollback DB
+                fileAttachmentDao.updateStatus(
+                    savedAttachment.getId(),
+                    FileAttachment.FileStatus.FAILED
+                );
+
+                notifyError(fileId, "P2P failed: " + e.getMessage());
+            }
+        }).start();
+        
+        
+        
+//        try {
+
+//            // 2. Copy file to upload directory
+//            String storedFileName = fileId + "_" + file.getName();
+//            Path storagePath = Paths.get(UPLOAD_DIR, storedFileName);
+//            Files.copy(file.toPath(), storagePath, StandardCopyOption.REPLACE_EXISTING);
+//            
+//            // 3. Calculate checksum BEFORE sending
+//            String checksum = calculateChecksum(storagePath.toFile());
+//            System.out.println("✅ File checksum calculated: " + checksum);
+//            
+//            // 4. Create message in DB (PENDING)
+//            String fileUrl = "file://" + file.getName() + "|" + formatFileSize(file.length());
+//            Message message = chatService.sendFileMessageIdempotent(
+//                conversationId,
+//                currentUserId,
+//                file.getName(),
+//                fileUrl,
+//                clientMessageId
+//            );
+//            
+//            if (message == null) {
+//                System.err.println("❌ Failed to save file message");
+//                notifyError(fileId, "Failed to save message to database");
+//                return;
+//            }
+//            
+//            // 5. Create file attachment metadata (UPLOADING status)
+//            FileAttachment attachment = new FileAttachment();
+//            attachment.setMessage(message);
+//            attachment.setSender(chatService.getUserById(currentUserId));
+//            attachment.setFileId(fileId);
+//            attachment.setFileName(file.getName());
+//            attachment.setFilePath(storagePath.toString());
+//            attachment.setFileSize(file.length());
+//            attachment.setMimeType(detectMimeType(file));
+//            attachment.setStatus(FileStatus.UPLOADING);
+//            attachment.setChecksum(checksum);
+//            
+//            FileAttachment savedAttachment = fileAttachmentDao.save(attachment);
+//            
+//            if (savedAttachment == null) {
+//                System.err.println("❌ Failed to save file attachment");
+//                notifyError(fileId, "Failed to save file metadata");
+//                return;
+//            }
+//            
+//            // 6. Track transfer context
+//            FileTransferContext context = new FileTransferContext(
+//                fileId, conversationId, currentUserId, toUserId,
+//                file.getName(), file.length(), clientMessageId, true
+//            );
+//            context.sourceFile = storagePath.toFile();
+//            context.checksum = checksum;
+//            context.messageId = message.getId();
+//            context.fileAttachmentId = savedAttachment.getId();
+//            pendingTransfers.put(fileId, context);
+//            
+//            // 7. Send file via P2P (trực tiếp, không cần request/accept)
+//            String p2pFileId = p2pManager.sendFile(
+//                toUserId, 
+//                storagePath.toFile(), 
+//                conversationId, 
+//                clientMessageId, 
+//                fileId
+//            );
+//            
+//            System.out.println("✅ File send initiated:");
+//            System.out.println("   - FileId: " + fileId);
+//            System.out.println("   - Message ID: " + message.getId());
+//            System.out.println("   - Attachment ID: " + savedAttachment.getId());
+//            System.out.println("   - Storage path: " + storagePath);
+//            System.out.println("   - Checksum: " + checksum);
+//            System.out.println("   - ClientMessageId: " + clientMessageId);
+//            
+//        } catch (Exception e) {
+//            notifyError(null, "Failed to send file: " + e.getMessage());
+//            e.printStackTrace();
+//        }
     }
 
     /**
@@ -366,57 +413,97 @@ public class FileTransferController {
     // ===== PUBLIC METHODS FOR P2P EVENTS =====
     
     /**
-     * Called when file chunk is received (first chunk contains metadata + checksum)
+     * ✅ Called when file chunk is received
+     * - Lưu chunks trực tiếp với tên file gốc (không có fileId prefix)
+     * - Nếu trùng tên, thêm timestamp
+     * - Sử dụng metadata từ P2PManager nếu cần
      */
-    public void handleFileChunk(Integer fromUserId, String fileId, int chunkIndex, 
-                               byte[] chunkData, int totalChunks, String fileName, 
-                               Long fileSize, Integer conversationId, String clientMessageId,
-                               String expectedChecksum) {
-        try {
-            FileTransferContext context = pendingTransfers.get(fileId);
-            
-            // First chunk - initialize context
-            if (chunkIndex == 0) {
-                context = new FileTransferContext(
-                    fileId, conversationId, fromUserId, currentUserId,
-                    fileName, fileSize, clientMessageId, false
-                );
-                context.checksum = expectedChecksum; // Store expected checksum
-                pendingTransfers.put(fileId, context);
-                
-                System.out.println("📥 Receiving file: " + fileName);
-                System.out.println("   - FileId: " + fileId);
-                System.out.println("   - Size: " + formatFileSize(fileSize));
-                System.out.println("   - Expected Checksum: " + expectedChecksum);
-                System.out.println("   - ClientMessageId: " + clientMessageId);
-            }
-            
+    public void handleFileChunk(Integer fromUserId, String fileId, int chunkIndex,
+                           byte[] chunkData, int totalChunks, String fileName,
+                           Long fileSize, Integer conversationId, String clientMessageId,
+                           String expectedChecksum) {
+    try {
+        FileTransferContext context = pendingTransfers.get(fileId);
+
+        // ✅ Init context (chunk đầu hoặc context mất)
+        if (chunkIndex == 0 || context == null) {
+
             if (context == null) {
-                System.err.println("❌ Unexpected file chunk: " + fileId);
-                return;
+                context = new FileTransferContext(
+                    fileId,
+                    conversationId,
+                    fromUserId,
+                    currentUserId,
+                    fileName,
+                    fileSize,
+                    clientMessageId,
+                    false
+                );
+                context.checksum = expectedChecksum;
+                context.finalFileName = determineFinalFileName(fileName);
+                pendingTransfers.put(fileId, context);
             }
-            
-            // Write chunk to temp file
-            String tempFileName = fileId + "_" + fileName;
-            Path tempPath = Paths.get(DOWNLOAD_DIR, tempFileName);
-            
-            if (chunkIndex == 0) {
-                // Create new file
-                Files.write(tempPath, chunkData);
-            } else {
-                // Append to existing file
-                Files.write(tempPath, chunkData, 
-                    java.nio.file.StandardOpenOption.APPEND);
-            }
-            
-            // Calculate progress
-            int progress = (int) (((chunkIndex + 1) * 100.0) / totalChunks);
-            notifyProgress(fileId, progress);
-            
-        } catch (Exception e) {
-            System.err.println("❌ Error handling file chunk: " + e.getMessage());
-            notifyError(fileId, e.getMessage());
         }
+
+        // ✅ Absolute path + ensure directory
+        Path finalPath = Paths.get(DOWNLOAD_DIR, context.finalFileName).toAbsolutePath();
+        Files.createDirectories(finalPath.getParent());
+
+        if (chunkIndex == 0) {
+            // ✅ Chunk đầu: tạo mới / ghi đè
+            Files.write(
+                finalPath,
+                chunkData,
+                java.nio.file.StandardOpenOption.CREATE,
+                java.nio.file.StandardOpenOption.TRUNCATE_EXISTING
+            );
+        } else {
+            // ✅ Các chunk sau: append
+            Files.write(
+                finalPath,
+                chunkData,
+                java.nio.file.StandardOpenOption.APPEND
+            );
+        }
+
+        int progress = (int) (((chunkIndex + 1) * 100.0) / totalChunks);
+        notifyProgress(fileId, progress);
+
+    } catch (Exception e) {
+        System.err.println("❌ Error writing chunk " + chunkIndex + ": " + e.getMessage());
+        e.printStackTrace();
+        notifyError(fileId, "Write error: " + e.getMessage());
+    }
+}
+
+    
+    /**
+     * ✅ Determine final filename - add timestamp if duplicate exists
+     */
+    private String determineFinalFileName(String originalFileName) {
+        Path basePath = Paths.get(DOWNLOAD_DIR, originalFileName);
+        
+        // ✅ If file doesn't exist, use original name
+        if (!Files.exists(basePath)) {
+            return originalFileName;
+        }
+        
+        // ✅ File exists - add timestamp to avoid conflict
+        String baseName = originalFileName;
+        String extension = "";
+        int lastDot = baseName.lastIndexOf('.');
+        if (lastDot > 0) {
+            extension = baseName.substring(lastDot);
+            baseName = baseName.substring(0, lastDot);
+        }
+        
+        String timestamp = String.valueOf(System.currentTimeMillis());
+        String newFileName = baseName + "_" + timestamp + extension;
+        
+        System.out.println("⚠️ [FileTransferController] File exists, using: " + newFileName + 
+                        " (original: " + originalFileName + ")");
+        
+        return newFileName;
     }
 
     /**
@@ -424,171 +511,87 @@ public class FileTransferController {
  */
 public void handleFileComplete(String fileId) {
     FileTransferContext context = pendingTransfers.get(fileId);
-    
-    if (context == null) {
-        System.err.println("⚠️ FILE_COMPLETE but context missing: " + fileId);
-        return;
-    }
-    
-    // ✅ GUARD: chỉ cho chạy 1 lần
+    if (context == null) return;
+
     synchronized (context) {
-        if (context.completed) {
-            System.out.println("⚠️ FILE_COMPLETE already handled: " + fileId);
-            return;
-        }
+        if (context.completed) return;
         context.completed = true;
     }
-    
+
     if (!context.isUpload) {
-        // ===== RECEIVER: Verify, save, and CREATE MESSAGE =====
         try {
-            String tempFileName = fileId + "_" + context.fileName;
-            Path tempPath = Paths.get(DOWNLOAD_DIR, tempFileName);
-            
-            if (!Files.exists(tempPath)) {
-                throw new IOException("File not found: " + tempPath);
+            // ✅ Delay nhẹ để OS flush file
+            try { Thread.sleep(200); } catch (InterruptedException ignored) {}
+
+            Path finalPath = Paths.get(DOWNLOAD_DIR, context.finalFileName).toAbsolutePath();
+            File fileObj = finalPath.toFile();
+
+            if (!fileObj.exists()) {
+                System.err.println("❌ ERROR: File completed but NOT FOUND: " + finalPath);
+                notifyError(fileId, "File missing after download");
+                return;
             }
-            
-            // Calculate checksum of received file
-            String receivedChecksum = calculateChecksum(tempPath.toFile());
-            
-            // Verify checksum if provided
-            boolean checksumValid = true;
+
+            // ✅ Checksum
+            String receivedChecksum = calculateChecksum(fileObj);
             if (context.checksum != null && !context.checksum.isEmpty()) {
-                checksumValid = verifyChecksum(tempPath.toFile(), context.checksum);
-                
-                if (!checksumValid) {
-                    throw new IOException("Checksum verification failed! File may be corrupted.");
+                if (!verifyChecksum(fileObj, context.checksum)) {
+                    throw new IOException("Checksum mismatch");
                 }
             }
-            
-            System.out.println("✅ RECEIVER: File received successfully:");
-            System.out.println("   - FileId: " + fileId);
-            System.out.println("   - Path: " + tempPath);
-            System.out.println("   - Size: " + context.fileSize);
-            System.out.println("   - Checksum: " + receivedChecksum);
-            
-            if (checksumValid) {
-                System.out.println("✅ Checksum verified successfully");
-            }
-            
-            // 1. CREATE MESSAGE IN DB (RECEIVER SIDE)
+
+            // ✅ Save message
             String fileUrl = "file://" + context.fileName + "|" + formatFileSize(context.fileSize);
             
-            Message msg = chatService.sendFileMessageIdempotent(
-                context.conversationId,
-                context.senderId,  // SENDER ID (the one who sent the file)
-                context.fileName,
-                fileUrl,
-                context.clientMessageId
-            );
-            
-            if (msg == null) {
-                System.err.println("❌ RECEIVER: Failed to create file message in DB");
-            } else {
-                System.out.println("✅ RECEIVER: Created file message in DB (ID: " + msg.getId() + ")");
-            }
-            
-            // ✅ 2. Copy file to final location with original name (for easy access)
-            Path finalPath = null;
-            try {
-                // Copy file from temp location to final location with original name
-                finalPath = Paths.get(DOWNLOAD_DIR, context.fileName);
-                
-                // Handle duplicate file names by adding number suffix
-                int counter = 1;
-                String baseName = context.fileName;
-                String extension = "";
-                int lastDot = baseName.lastIndexOf('.');
-                if (lastDot > 0) {
-                    extension = baseName.substring(lastDot);
-                    baseName = baseName.substring(0, lastDot);
-                }
-                
-                while (Files.exists(finalPath)) {
-                    String newName = baseName + "_" + counter + extension;
-                    finalPath = Paths.get(DOWNLOAD_DIR, newName);
-                    counter++;
-                }
-                
-                Files.copy(tempPath, finalPath, StandardCopyOption.REPLACE_EXISTING);
-                System.out.println("✅ RECEIVER: File copied to final location: " + finalPath);
-                
-                // Optionally: Delete temp file to save space
-                // Files.delete(tempPath);
-                
-            } catch (Exception e) {
-                System.err.println("⚠️ RECEIVER: Failed to copy file to final location: " + e.getMessage());
-                // Continue with temp path if copy fails
-                finalPath = tempPath;
-            }
+         // 1️⃣ LẤY message đã có
+//            Message msg = chatService.getMessageByClientId(context.clientMessageId);
+//            if (msg == null) {
+//                notifyError(fileId, "Message FILE not found");
+//                return;
+//            }
+            Message msg = chatService.createFileMessageWithAttachment(
+            	    context.conversationId,
+            	    context.senderId,   // sender THỰC SỰ của file
+            	    fileObj,
+            	    fileId
+            	);
 
-            // ✅ 3. Create FileAttachment with final path
-            FileAttachment attachment = new FileAttachment();
-            attachment.setMessage(msg);
-            attachment.setSender(chatService.getUserById(context.senderId));
-            attachment.setFileId(fileId);
-            attachment.setFileName(context.fileName);
-            attachment.setFilePath(finalPath != null ? finalPath.toString() : tempPath.toString());
-            attachment.setFileSize(context.fileSize);
-            attachment.setMimeType(detectMimeType(finalPath != null ? finalPath.toFile() : tempPath.toFile()));
-            attachment.setStatus(FileStatus.COMPLETED);
-            attachment.setChecksum(receivedChecksum);
-            
-            FileAttachment savedAttachment = fileAttachmentDao.save(attachment);
-            if (savedAttachment != null) {
-                System.out.println("✅ RECEIVER: FileAttachment saved (ID: " + savedAttachment.getId() + ")");
-            }
+        	if (msg == null) {
+        	    notifyError(fileId, "Failed to create file message");
+        	    return;
+        	}
 
-            // 2. Notify UI to display message
-            if (msg != null && chatController != null) {
-                chatController.handleIncomingMessage(context.conversationId, msg);
-                System.out.println("✅ RECEIVER: Notified UI to display file message");
-            }
+
+         // hiển thị trong UI
+           // msg.setImageUrl(context.fileName);
             
-            // ✅ 4. Notify UI to display message
-            if (msg != null && chatController != null) {
-                chatController.handleIncomingMessage(context.conversationId, msg);
-                System.out.println("✅ RECEIVER: Notified UI to display file message");
-            }
+         // 2️⃣ CHỈ TẠO FileAttachment
+//            FileAttachment attachment = new FileAttachment();
+//            attachment.setMessage(msg);
+//            attachment.setSender(chatService.getUserById(context.senderId));
+//            attachment.setFileId(fileId);
+//            attachment.setFileName(context.fileName);
+//            attachment.setFilePath(fileObj.getAbsolutePath()); // QUAN TRỌNG
+//            attachment.setFileSize(fileObj.length());
+//            attachment.setMimeType(detectMimeType(fileObj));
+//            attachment.setChecksum(receivedChecksum);
+//            attachment.setStatus(FileStatus.COMPLETED);
+//
+//            fileAttachmentDao.save(attachment);
             
-            // ✅ 5. Notify listener with FILE OBJECT (use final path)
-            notifyComplete(fileId, finalPath != null ? finalPath.toFile() : tempPath.toFile(), false);
-            
-            // ✅ 6. Send FILE_ACK back to sender
+            notifyComplete(fileId, fileObj, false);
             sendFileAck(fileId, context.senderId);
-           
+
         } catch (Exception e) {
-            System.err.println("❌ RECEIVER: Error saving received file: " + e.getMessage());
-            e.printStackTrace();
-            
-            // Send FILE_NACK back to sender
+            notifyError(fileId, e.getMessage());
             sendFileNack(fileId, context.senderId, e.getMessage());
-            
-            notifyError(fileId, "Failed to save file: " + e.getMessage());
-        }
-    } else {
-        // ===== SENDER: Just update status =====
-        try {
-            System.out.println("✅ SENDER: File sent successfully:");
-            System.out.println("   - File ID: " + fileId);
-            System.out.println("   - Message ID: " + context.messageId);
-            System.out.println("   - Attachment ID: " + context.fileAttachmentId);
-            
-            // Notify listener (for progress dialog)
-            notifyComplete(fileId, context.sourceFile, true);
-            
-            // Message already created when user clicked send
-            // No need to create again here
-            
-        } catch (Exception e) {
-            System.err.println("❌ Error updating file status: " + e.getMessage());
-            e.printStackTrace();
         }
     }
-    
+
     pendingTransfers.remove(fileId);
+    p2pManager.removeFileMetadata(fileId);
 }
+
 
     public void handleFileCanceled(String fileId, boolean isUpload) {
         FileTransferContext context = pendingTransfers.remove(fileId);
@@ -600,17 +603,21 @@ public void handleFileComplete(String fileId) {
             }
             
             if (!isUpload) {
-                // Clean up incomplete download
+                // ✅ Clean up incomplete download (file saved with final filename)
                 try {
-                    String tempFileName = fileId + "_" + context.fileName;
-                    Path tempPath = Paths.get(DOWNLOAD_DIR, tempFileName);
-                    if (Files.exists(tempPath)) {
-                        Files.delete(tempPath);
+                    String finalFileName = context.finalFileName != null ? context.finalFileName : context.fileName;
+                    Path finalPath = Paths.get(DOWNLOAD_DIR, finalFileName);
+                    if (Files.exists(finalPath)) {
+                        Files.delete(finalPath);
+                        System.out.println("🗑️ [FileTransferController] Deleted canceled file: " + finalPath);
                     }
                 } catch (IOException e) {
-                    System.err.println("⚠️ Error cleaning up canceled file: " + e.getMessage());
+                    System.err.println("⚠️ [FileTransferController] Error cleaning up canceled file: " + e.getMessage());
                 }
             }
+            
+            // ✅ Clean up metadata
+            p2pManager.removeFileMetadata(fileId);
         }
         
         notifyError(fileId, "Transfer canceled");

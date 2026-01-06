@@ -1,9 +1,13 @@
 package service;
 
+import java.io.File;
+import java.io.IOException;
 import java.util.List;
 
 import dao.FriendDao;
+import dao.MessageDao;
 import model.Conversation;
+import model.FileAttachment;
 import model.FriendRequest;
 import model.Message;
 import model.Users;
@@ -220,6 +224,51 @@ public class ChatService {
     public Message findByClientMessageId(String clientMessageId) {
         return messageService.findByClientMessageId(clientMessageId);
     }
-
+    
+    public Message findMessageByFileUrl(Integer conversationId, String fileUrl) {
+    	return messageService.findMessageByFileUrl(conversationId, fileUrl);
+    }
+    
+    public FileAttachment createFileAttachment(
+            Message msg,
+            Integer senderId,
+            File file,
+            String fileId
+    ) throws IOException {
+        return messageService.createFileAttachment(
+            msg,
+            senderId,
+            file,
+            fileId
+        );
+    }
+    
+    public Message createFileMessage(
+            Integer conversationId,
+            Integer senderId,
+            String fileName,
+            String fileUrl
+    ) {
+    	return messageService.createFileMessage(conversationId, senderId, fileName, fileUrl);
+    }
+    
+    public Message createFileMessageWithAttachment(
+            Integer conversationId,
+            Integer senderId,
+            File file,
+            String fileId
+    ) throws IOException {
+    	return messageService.createFileMessageWithAttachment(conversationId, senderId, file, fileId);
+    }
+    
+    public FileAttachment saveFileMessageAndAttachment(
+            Integer conversationId,
+            Integer senderId,
+            File file,
+            String fileId,
+            String clientMessageId
+    ) throws Exception {
+    	return messageService.saveFileMessageAndAttachment(conversationId, senderId, file, fileId, clientMessageId);
+    }
     
 }

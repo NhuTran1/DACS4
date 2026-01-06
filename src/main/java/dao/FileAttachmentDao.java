@@ -1,6 +1,7 @@
 package dao;
 
 import model.FileAttachment;
+import model.Message;
 import model.FileAttachment.FileStatus;
 import org.hibernate.Session;
 import org.hibernate.Transaction;
@@ -17,29 +18,32 @@ public class FileAttachmentDao {
     /**
      * Lưu file attachment mới
      */
-    public FileAttachment save(FileAttachment attachment) {
-        Transaction tx = null;
-        try (Session session = HibernateUtil.getSessionFactory().openSession()) {
-            tx = session.beginTransaction();
-            
-            // Set default status if not set
-            if (attachment.getStatus() == null) {
-                attachment.setStatus(FileStatus.UPLOADING);
-            }
-            
-            session.save(attachment);
-            tx.commit();
-            
-            System.out.println("✅ FileAttachment saved: " + attachment.getFileName() + 
-                             " (Status: " + attachment.getStatus() + ")");
-            return attachment;
-        } catch (Exception e) {
-            if (tx != null) tx.rollback();
-            System.err.println("❌ Error saving FileAttachment: " + e.getMessage());
-            e.printStackTrace();
-            return null;
-        }
-    }
+	public FileAttachment save(FileAttachment attachment) {
+	    Transaction tx = null;
+	    try (Session session = HibernateUtil.getSessionFactory().openSession()) {
+	        tx = session.beginTransaction();
+
+	        // ⚠ đảm bảo message attach vào session
+	        Message managedMsg = session.get(
+	            Message.class,
+	            attachment.getMessage().getId()
+	        );
+	        attachment.setMessage(managedMsg);
+
+	        if (attachment.getStatus() == null) {
+	            attachment.setStatus(FileStatus.UPLOADING);
+	        }
+
+	        session.persist(attachment);
+	        tx.commit();
+	        return attachment;
+	    } catch (Exception e) {
+	        if (tx != null) tx.rollback();
+	        e.printStackTrace();
+	        return null;
+	    }
+	}
+
 
     /**
      * Update file attachment status
@@ -370,6 +374,29 @@ public class FileAttachmentDao {
         } catch (Exception e) {
             System.err.println("❌ Error searching files: " + e.getMessage());
             return List.of();
+        }
+    }
+
+    /**
+     * ✅ Tìm file attachment theo messageId
+     */
+    public FileAttachment findByMessageId(Integer messageId) {
+        try (Session session = HibernateUtil.getSessionFactory().openSession()) {
+            String sql = """
+                SELECT *
+                FROM file_attachment
+                WHERE message_id = :messageId
+                LIMIT 1
+                """;
+            
+            Query<FileAttachment> query = session.createNativeQuery(sql, FileAttachment.class);
+            query.setParameter("messageId", messageId);
+            
+            List<FileAttachment> results = query.getResultList();
+            return results.isEmpty() ? null : results.get(0);
+        } catch (Exception e) {
+            System.err.println("❌ Error finding FileAttachment by messageId: " + e.getMessage());
+            return null;
         }
     }
 }

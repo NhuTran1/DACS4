@@ -45,6 +45,9 @@ public class Message {
     @Column(name = "message_type", nullable = false)
     private MessageType messageType;
 
+    @OneToOne(mappedBy = "message", fetch = FetchType.LAZY, cascade = CascadeType.ALL)
+    private FileAttachment fileAttachment;
+
     @Column(columnDefinition = "TEXT")
     private String content;
 

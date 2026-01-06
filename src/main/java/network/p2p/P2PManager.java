@@ -192,8 +192,8 @@ public class P2PManager implements PeerConnection.P2PMessageHandler {
      * Gửi file tới user (trực tiếp, không cần request/accept)
      */
     public String sendFile(Integer toUserId, File file, Integer conversationId, 
-                          String clientMessageId) throws Exception {
-        return fileTransferManager.sendFile(toUserId, file, conversationId, clientMessageId);
+                          String clientMessageId,  String fileId) throws Exception {
+        return fileTransferManager.sendFile(toUserId, file, conversationId, clientMessageId, fileId);
     }
 
     /**
@@ -366,10 +366,23 @@ public class P2PManager implements PeerConnection.P2PMessageHandler {
         Number totalChunks = (Number) msg.data.get("totalChunks");
         String chunkDataB64 = (String) msg.data.get("chunkData");
         
-        // Decode chunk data
-        byte[] chunkData = java.util.Base64.getDecoder().decode(chunkDataB64);
+        // ✅ Validation
+        if (fileId == null || chunkIndex == null || totalChunks == null || chunkDataB64 == null) {
+            System.err.println("❌ [P2PManager] Invalid FILE_CHUNK message: missing required fields");
+            return;
+        }
         
-        // Metadata from first chunk
+        // Decode chunk data
+        byte[] chunkData;
+        try {
+            chunkData = java.util.Base64.getDecoder().decode(chunkDataB64);
+        } catch (IllegalArgumentException e) {
+            System.err.println("❌ [P2PManager] Failed to decode chunk data for fileId=" + fileId + 
+                            ", chunkIndex=" + chunkIndex + ": " + e.getMessage());
+            return;
+        }
+        
+        // ✅ Extract metadata from first chunk
         String fileName = null;
         Long fileSize = null;
         Integer conversationId = null;
@@ -384,9 +397,36 @@ public class P2PManager implements PeerConnection.P2PMessageHandler {
             conversationId = convId != null ? convId.intValue() : null;
             clientMessageId = (String) msg.data.get("clientMessageId");
             checksum = (String) msg.data.get("checksum");
+            
+            // ✅ Validate first chunk metadata
+            if (fileName == null || fileSize == null || conversationId == null) {
+                System.err.println("❌ [P2PManager] Invalid first chunk: missing metadata (fileName=" + 
+                                fileName + ", fileSize=" + fileSize + ", conversationId=" + conversationId + ")");
+                return;
+            }
+            
+            // ✅ Store metadata in P2PManager for subsequent chunks
+            storeFileMetadata(fileId, fileName, fileSize, conversationId, clientMessageId, checksum, msg.from);
+            
+            System.out.println("📥 [P2PManager] First chunk received: fileId=" + fileId + 
+                            ", fileName=" + fileName + ", size=" + fileSize + 
+                            ", totalChunks=" + totalChunks);
+        } else {
+            // ✅ For subsequent chunks, get metadata from storage
+            FileChunkMetadata metadata = getFileMetadata(fileId);
+            if (metadata == null) {
+                System.err.println("❌ [P2PManager] Missing metadata for chunk " + chunkIndex + 
+                                " of fileId=" + fileId);
+                return;
+            }
+            fileName = metadata.fileName;
+            fileSize = metadata.fileSize;
+            conversationId = metadata.conversationId;
+            clientMessageId = metadata.clientMessageId;
+            checksum = metadata.checksum;
         }
         
-     // ✅ FORWARD TO FileTransferController
+        // ✅ FORWARD TO FileTransferController
         if (chatController != null && chatController.getFileTransferController() != null) {
             chatController.getFileTransferController().handleFileChunk(
                 msg.from, 
@@ -398,8 +438,10 @@ public class P2PManager implements PeerConnection.P2PMessageHandler {
                 fileSize, 
                 conversationId, 
                 clientMessageId,
-                checksum  // ✅ Pass checksum
+                checksum
             );
+        } else {
+            System.err.println("❌ [P2PManager] FileTransferController not available");
         }
     }
 
@@ -446,34 +488,58 @@ public class P2PManager implements PeerConnection.P2PMessageHandler {
         }
     }
 
-    // Temporary storage for file chunks metadata
+    // ✅ Storage for file chunks metadata - used by FileTransferController
     private final Map<String, FileChunkMetadata> fileChunkMetadata = new ConcurrentHashMap<>();
     
-    private static class FileChunkMetadata {
-        String fileName;
-        Long fileSize;
-        Integer conversationId;
-        String clientMessageId;
+    public static class FileChunkMetadata {
+        public String fileName;
+        public Long fileSize;
+        public Integer conversationId;
+        public String clientMessageId;
+        public String checksum;
+        public Integer fromUserId;
+        
+        public FileChunkMetadata() {}
+        
+        public FileChunkMetadata(String fileName, Long fileSize, Integer conversationId, 
+                               String clientMessageId, String checksum, Integer fromUserId) {
+            this.fileName = fileName;
+            this.fileSize = fileSize;
+            this.conversationId = conversationId;
+            this.clientMessageId = clientMessageId;
+            this.checksum = checksum;
+            this.fromUserId = fromUserId;
+        }
     }
     
-    private void handleFileChunkData(Integer fromUser, String fileId, int chunkIndex, 
-                                    byte[] chunkData, int totalChunks, String fileName, 
-                                    Long fileSize, Integer conversationId, String clientMessageId) {
-        // Store metadata from first chunk
-        if (chunkIndex == 0 && fileName != null) {
-            FileChunkMetadata metadata = new FileChunkMetadata();
-            metadata.fileName = fileName;
-            metadata.fileSize = fileSize;
-            metadata.conversationId = conversationId;
-            metadata.clientMessageId = clientMessageId;
-            fileChunkMetadata.put(fileId, metadata);
-        }
-        
-        // Get metadata for subsequent chunks
-        FileChunkMetadata metadata = fileChunkMetadata.get(fileId);
-        if (metadata == null && chunkIndex > 0) {
-            System.err.println("❌ Missing metadata for file: " + fileId);
-            return;
+    /**
+     * ✅ Store file metadata for chunks (called from handleFileChunk)
+     */
+    public void storeFileMetadata(String fileId, String fileName, Long fileSize, 
+                                  Integer conversationId, String clientMessageId, 
+                                  String checksum, Integer fromUserId) {
+        FileChunkMetadata metadata = new FileChunkMetadata(
+            fileName, fileSize, conversationId, clientMessageId, checksum, fromUserId
+        );
+        fileChunkMetadata.put(fileId, metadata);
+        System.out.println("📦 [P2PManager] Stored metadata for fileId=" + fileId + 
+                          ", fileName=" + fileName + ", fromUserId=" + fromUserId);
+    }
+    
+    /**
+     * ✅ Get file metadata (used by FileTransferController)
+     */
+    public FileChunkMetadata getFileMetadata(String fileId) {
+        return fileChunkMetadata.get(fileId);
+    }
+    
+    /**
+     * ✅ Remove file metadata after transfer completes
+     */
+    public void removeFileMetadata(String fileId) {
+        FileChunkMetadata removed = fileChunkMetadata.remove(fileId);
+        if (removed != null) {
+            System.out.println("🗑️ [P2PManager] Removed metadata for fileId=" + fileId);
         }
     }
     
@@ -615,14 +681,16 @@ public class P2PManager implements PeerConnection.P2PMessageHandler {
         this.eventListener = listener;
     }
     
-    // Method to expose file chunk handling to FileTransferController
-    public FileChunkMetadata getFileMetadata(String fileId) {
-        return fileChunkMetadata.get(fileId);
+    /**
+     * ✅ Trigger onChatMessageReceived event manually (for local messages like file messages)
+     */
+    public void triggerChatMessageReceived(Integer conversationId, Message message) {
+        if (eventListener != null) {
+            eventListener.onChatMessageReceived(conversationId, message);
+        }
     }
     
-    public void removeFileMetadata(String fileId) {
-        fileChunkMetadata.remove(fileId);
-    }
+    // ✅ Methods already defined above
 
     // ===== CLEANUP =====
 

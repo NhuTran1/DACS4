@@ -18,29 +18,26 @@ public class MessageDao {
     /**
      * Tìm message theo clientMessageId (để kiểm tra idempotent)
      */
-    public Message findByClientMessageId(String clientMessageId) {
-        if (clientMessageId == null || clientMessageId.isEmpty()) {
-            return null;
-        }
-        
-        try (Session session = HibernateUtil.getSessionFactory().openSession()) {
-            String sql = """
-                SELECT *
-                FROM message
-                WHERE client_message_id = :clientMsgId
-                LIMIT 1
-                """;
-            
-            Query<Message> query = session.createNativeQuery(sql, Message.class);
-            query.setParameter("clientMsgId", clientMessageId);
-            
-            List<Message> results = query.getResultList();
-            return results.isEmpty() ? null : results.get(0);
-        } catch (Exception e) {
-            e.printStackTrace();
-            return null;
-        }
-    }
+	// Dùng khi ĐỘC LẬP
+	public Message findByClientMessageId(String clientMessageId) {
+	    try (Session session = HibernateUtil.getSessionFactory().openSession()) {
+	        return findByClientMessageId(session, clientMessageId);
+	    }
+	}
+
+	// Dùng khi trong transaction
+	private Message findByClientMessageId(Session session, String clientMessageId) {
+	    String sql = """
+	        SELECT *
+	        FROM message
+	        WHERE client_message_id = :id
+	        LIMIT 1
+	    """;
+
+	    Query<Message> q = session.createNativeQuery(sql, Message.class);
+	    q.setParameter("id", clientMessageId);
+	    return q.uniqueResult();
+	}
     
     /**
      * Lưu tin nhắn mới với clientMessageId và status (idempotent)
@@ -229,36 +226,40 @@ public class MessageDao {
 	}
 	
 	//Đánh dấu tin nhắn đã đọc cho 1 user
-	public void markMessageSeen(Integer messageId, Integer from) {
+	public void markMessageSeen(Integer messageId, Integer userId) {
 	    Transaction tx = null;
 
 	    try (Session session = HibernateUtil.getSessionFactory().openSession()) {
 	        tx = session.beginTransaction();
 
+	        // 1️⃣ Check tồn tại (native query an toàn)
 	        String checkSql = """
-	                SELECT COUNT(*)
-	                FROM message_seen
-	                WHERE message_id = :mid AND user_id = :uid
-	                """;
+	            SELECT 1
+	            FROM message_seen
+	            WHERE message_id = :mid AND user_id = :uid
+	            LIMIT 1
+	        """;
 
-	        Query<?> checkQuery = session.createNativeQuery(checkSql);
-	        checkQuery.setParameter("mid", messageId);
-	        checkQuery.setParameter("uid", from);
+	        Object exists = session.createNativeQuery(checkSql)
+	                .setParameter("mid", messageId)
+	                .setParameter("uid", userId)
+	                .uniqueResult();
 
-	        Number count = (Number) checkQuery.getSingleResult();
-
-	        if (count.intValue() == 0) {
+	        if (exists == null) {
 	            MessageSeen seen = new MessageSeen();
-	            seen.setMessage(session.get(Message.class, messageId));
-	            seen.setUser(session.get(Users.class, from));
 
-	            session.save(seen);
+	            // 2️⃣ DÙNG getReference (KHÔNG query DB)
+	            seen.setMessage(session.getReference(Message.class, messageId));
+	            seen.setUser(session.getReference(Users.class, userId));
+
+	            session.persist(seen);
 	        }
 
 	        tx.commit();
 
 	    } catch (Exception e) {
 	        if (tx != null) tx.rollback();
+	        System.err.println("❌ Error marking message as seen: " + e.getMessage());
 	        e.printStackTrace();
 	    }
 	}
@@ -432,5 +433,37 @@ public class MessageDao {
 	        return List.of();
 	    }
 	}
+	
+	public Message findMessageByFileUrl(Integer conversationId, String fileUrl) {
+	    try (Session session = HibernateUtil.getSessionFactory().openSession()) {
+	        String sql = """
+	            SELECT *
+	            FROM message
+	            WHERE conversation_id = :cid
+	              AND image_url = :url
+	            LIMIT 1
+	        """;
+
+	        Query<Message> q = session.createNativeQuery(sql, Message.class);
+	        q.setParameter("cid", conversationId);
+	        q.setParameter("url", fileUrl);
+
+	        return q.uniqueResult();
+	    }
+	}
+	
+	public void update(Message message) {
+	    Transaction tx = null;
+	    try (Session session = HibernateUtil.getSessionFactory().openSession()) {
+	        tx = session.beginTransaction();
+	        session.update(message);   // hoặc session.merge(message)
+	        tx.commit();
+	    } catch (Exception e) {
+	        if (tx != null) tx.rollback();
+	        e.printStackTrace();
+	    }
+	}
+
+
 
 }

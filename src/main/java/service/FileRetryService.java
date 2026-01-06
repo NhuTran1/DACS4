@@ -139,13 +139,14 @@ public class FileRetryService {
             }
             
             System.out.println("🔄 Retrying file upload: " + fileAttachment.getFileName());
-            
+              
             // Retry send via P2P
             String p2pFileId = p2pManager.sendFile(
                 recipientId,
                 sourceFile,
                 message.getConversation().getId(),
-                message.getClientMessageId()
+                message.getClientMessageId(),
+                fileAttachment.getFileId() 
             );
             
             System.out.println("✅ File upload retry initiated: " + fileAttachment.getFileName());

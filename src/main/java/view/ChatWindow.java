@@ -2,6 +2,7 @@ package view;
 
 import client.ClientManager;
 import controller.ChatController;
+import dao.FileAttachmentDao;
 import javafx.animation.FadeTransition;
 import javafx.animation.ScaleTransition;
 import javafx.application.Platform;
@@ -19,6 +20,7 @@ import javafx.stage.FileChooser;
 import javafx.stage.Stage;
 import javafx.util.Duration;
 import model.Conversation;
+import model.FileAttachment;
 import model.FriendRequest;
 import model.Message;
 import model.Users;
@@ -26,9 +28,12 @@ import network.p2p.P2PManager;
 import network.p2p.PeerInfo;
 import service.ChatService;
 
+import java.awt.Desktop;
 import java.io.File;
+import java.io.IOException;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 import org.kordamp.ikonli.javafx.FontIcon;
 
@@ -56,6 +61,9 @@ public class ChatWindow {
     private Conversation currentConversation;
     private Users currentChatUser;
     private Map<Integer, Circle> userStatusIndicators = new HashMap<>();
+ // ChatWindow field
+    private final Map<String, File> pendingUploadFiles = new ConcurrentHashMap<>();
+
     
     // ✅ Shutdown management
     private javafx.animation.Timeline statusRefreshTimeline;
@@ -1076,7 +1084,7 @@ public class ChatWindow {
     
     
  // ===== NEW: Create file message box =====
-    private VBox createFileMessageBox(String fileUrl, boolean isOwn) {
+    private VBox createFileMessageBox(Message msg, boolean isOwn) {
         VBox fileBox = new VBox(8);
         fileBox.setStyle("""
             -fx-background-color: rgba(0, 0, 0, 0.2);
@@ -1084,6 +1092,8 @@ public class ChatWindow {
             -fx-padding: 12;
         """);
         
+        String fileUrl = msg.getImageUrl(); // chỉ dùng để parse name/size
+        		
         // Parse file info from URL
         String fileName = extractFileName(fileUrl);
         String fileSize = extractFileSize(fileUrl);
@@ -1122,7 +1132,9 @@ public class ChatWindow {
             -fx-font-weight: bold;
         """);
         
-        downloadBtn.setOnAction(e -> openFile(fileUrl));
+    
+        
+        downloadBtn.setOnAction(e -> openFile(msg));
         
         fileBox.getChildren().addAll(fileHeader, downloadBtn);
         
@@ -1152,64 +1164,246 @@ public class ChatWindow {
     }
 
     // ===== HELPER: Open file =====
-    private void openFile(String fileUrl) {
+//    private void openFile(String fileUrl) {
+//        try {
+//        	 Message msg = chatService.findMessageByFileUrl(
+//        	            currentConversation.getId(), fileUrl
+//        	        );
+//        	 if (msg == null || msg.getFileAttachment() == null) {
+//                 showAlert("Error", "File metadata not found");
+//                 return;
+//             }
+//
+//             File file = new File(msg.getFileAttachment().getFilePath());
+//
+//             if (!file.exists()) {
+//                 showAlert("Error", "File missing on disk");
+//                 return;
+//             }
+//
+//             Desktop.getDesktop().open(file);
+//
+//            
+//            // ✅ Strategy 1: Tìm file từ FileAttachment trong DB (nếu có message context)
+//            // Lấy message từ fileUrl hoặc từ current conversation
+////            if (currentConversation != null) {
+////                List<model.Message> messages = chatService.listMessages(currentConversation.getId());
+////                for (model.Message msg : messages) {
+////                    if (msg.getImageUrl() != null && msg.getImageUrl().equals(fileUrl)) {
+////                        // Tìm FileAttachment từ messageId
+////                        dao.FileAttachmentDao fileDao = new dao.FileAttachmentDao();
+////                        model.FileAttachment attachment = fileDao.findByMessageId(msg.getId());
+////                        if (attachment != null && attachment.getFilePath() != null) {
+////                            file = new File(attachment.getFilePath());
+////                            System.out.println("✅ [ChatWindow] Found file from FileAttachment: " + file.getAbsolutePath());
+////                            break;
+////                        }
+////                    }
+////                }
+////            }
+//            
+//            // ✅ Strategy 2: Tìm file trong downloads directory với tên gốc hoặc có timestamp
+////            if (file == null || !file.exists()) {
+////                File downloadsDir = new File("file_storage/downloads");
+////                
+////                // Thử tìm với tên gốc trước
+////                file = new File(downloadsDir, fileName);
+////                
+////                // Nếu không tìm thấy, tìm file có chứa tên này (có thể có timestamp)
+////                if (!file.exists()) {
+////                	String baseNameTmp = fileName;
+////                	String extensionTmp = "";
+////
+////                	int lastDot = baseNameTmp.lastIndexOf('.');
+////                	if (lastDot > 0) {
+////                	    extensionTmp = baseNameTmp.substring(lastDot);
+////                	    baseNameTmp = baseNameTmp.substring(0, lastDot);
+////                	}
+////
+////                	// ✅ biến final dùng cho lambda
+////                	final String baseName = baseNameTmp;
+////                	final String extension = extensionTmp;
+////
+////                	File[] files = downloadsDir.listFiles((dir, name) ->
+////                	    name.equals(fileName) ||
+////                	    (name.startsWith(baseName + "_") && name.endsWith(extension)) ||
+////                	    name.contains(baseName)
+////                	);
+////                    
+////                    if (files != null && files.length > 0) {
+////                        // Lấy file mới nhất (có thể có timestamp)
+////                        file = files[0];
+////                        for (File f : files) {
+////                            if (f.lastModified() > file.lastModified()) {
+////                                file = f;
+////                            }
+////                        }
+////                        System.out.println("✅ [ChatWindow] Found file by name pattern: " + file.getName());
+////                    }
+////                } else {
+////                    System.out.println("✅ [ChatWindow] Found file with original name: " + fileName);
+////                }
+////            }
+//            
+////            // ✅ Strategy 3: Tìm trong uploads directory (cho sender)
+////            if (file == null || !file.exists()) {
+////                File uploadsDir = new File("file_storage/uploads");
+////                if (uploadsDir.exists()) {
+////                    File[] files = uploadsDir.listFiles((dir, name) -> 
+////                        name.equals(fileName) || name.contains(fileName)
+////                    );
+////                    
+////                    if (files != null && files.length > 0) {
+////                        file = files[0];
+////                        for (File f : files) {
+////                            if (f.lastModified() > file.lastModified()) {
+////                                file = f;
+////                            }
+////                        }
+////                        System.out.println("✅ [ChatWindow] Found file in uploads: " + file.getName());
+////                    }
+////                }
+////            }
+//            
+//            // ✅ Open file
+//            if (file != null && file.exists()) {
+//                if (java.awt.Desktop.isDesktopSupported()) {
+//                    java.awt.Desktop.getDesktop().open(file);
+//                    System.out.println("✅ [ChatWindow] Opened file: " + file.getAbsolutePath());
+//                } else {
+//                    showAlert("Error", "Cannot open file on this system");
+//                }
+//            } else {
+//            	String errorMsg = "File not found: " + msg.getFileAttachment().getFileName();
+//
+//                showAlert("Error", errorMsg);
+//                System.err.println("❌ [ChatWindow] " + errorMsg);
+//            }
+//        } catch (Exception e) {
+//            showAlert("Error", "Failed to open file: " + e.getMessage());
+//            System.err.println("❌ [ChatWindow] Error opening file: " + e.getMessage());
+//            e.printStackTrace();
+//        }
+//    }
+    
+//	private void openFile(String fileUrl) {
+//	    try {
+//	        // 1. Lấy message (từ imageUrl hoặc fileUrl)
+//	        Message msg = chatService.findMessageByFileUrl(
+//	                currentConversation.getId(), fileUrl
+//	        );
+//	
+//	        if (msg == null) {
+//	            showAlert("Error", "Message not found");
+//	            return;
+//	        }
+//	
+//	        // 2. Lấy FileAttachment theo messageId
+//	        FileAttachmentDao fileDao = new FileAttachmentDao();
+//	        FileAttachment attachment = fileDao.findByMessageId(msg.getId());
+//	
+//	        if (attachment == null) {
+//	        	System.err.println("❌ No FileAttachment for messageId=" + msg.getId());
+//	            showAlert("Error", "File metadata not found");
+//	            return;
+//	        }
+//	
+//	        // 3. Validate status
+//	        if (attachment.getStatus() != FileAttachment.FileStatus.COMPLETED) {
+//	            showAlert("Error", "File is not ready yet");
+//	            return;
+//	        }
+//	
+//	        // 4. Open file
+//	        File file = new File(attachment.getFilePath());
+//	        if (!file.exists()) {
+//	            showAlert("Error", "File missing on disk");
+//	            return;
+//	        }
+//	
+//	        Desktop.getDesktop().open(file);
+//	        System.out.println("✅ Opened file: " + file.getAbsolutePath());
+//	
+//	    } catch (Exception e) {
+//	        showAlert("Error", "Failed to open file: " + e.getMessage());
+//	        e.printStackTrace();
+//	    }
+//	}
+    
+//    private void openFile(Integer messageId) {
+//        try {
+//            FileAttachmentDao fileDao = new FileAttachmentDao();
+//
+//            FileAttachment attachment =
+//                fileDao.findByMessageId(messageId);
+//
+//            if (attachment == null) {
+//                System.err.println("❌ No FileAttachment for messageId=" + messageId);
+//                showAlert("Error", "File metadata not found");
+//                return;
+//            }
+//
+//            if (attachment.getStatus() != FileAttachment.FileStatus.COMPLETED) {
+//                showAlert("Error", "File is not ready yet");
+//                return;
+//            }
+//
+//            File file = new File(attachment.getFilePath());
+//            if (!file.exists()) {
+//                showAlert("Error", "File missing on disk");
+//                return;
+//            }
+//
+//            Desktop.getDesktop().open(file);
+//
+//        } catch (Exception e) {
+//            showAlert("Error", "Failed to open file: " + e.getMessage());
+//            e.printStackTrace();
+//        }
+//    }
+    
+    private void openFile(Message msg) {
         try {
-            String fileName = extractFileName(fileUrl);
-            
-            // ✅ Tìm file trong file_storage/downloads với tên gốc
-            File downloadsDir = new File("file_storage/downloads");
-            File file = new File(downloadsDir, fileName);
-            
-            // ✅ Nếu không tìm thấy với tên gốc, tìm file có chứa tên này (có thể có suffix)
+            if (msg == null) {
+                showAlert("Error", "Message not found");
+                return;
+            }
+
+            // ✅ QUERY ĐÚNG DUY NHẤT
+            FileAttachmentDao fileDao = new FileAttachmentDao();
+            FileAttachment fa = fileDao.findByMessageId(msg.getId());
+
+            if (fa == null) {
+                System.err.println("❌ No FileAttachment for messageId=" + msg.getId());
+                showAlert("Error", "File metadata not found");
+                return;
+            }
+
+            // ✅ CHECK STATUS
+            if (fa.getStatus() != FileAttachment.FileStatus.COMPLETED) {
+                showAlert("Error", "File is not ready yet");
+                return;
+            }
+
+            // ✅ CHECK FILE THẬT
+            File file = new File(fa.getFilePath());
             if (!file.exists()) {
-                File[] files = downloadsDir.listFiles((dir, name) -> 
-                    name.startsWith(fileName.replaceFirst("\\.[^.]+$", "")) || 
-                    name.contains(fileName)
-                );
-                
-                if (files != null && files.length > 0) {
-                    // Lấy file mới nhất
-                    file = files[0];
-                    for (File f : files) {
-                        if (f.lastModified() > file.lastModified()) {
-                            file = f;
-                        }
-                    }
-                }
+                showAlert("Error", "File missing on disk");
+                return;
             }
-            
-            // ✅ Nếu vẫn không tìm thấy, thử tìm trong file_storage/downloads với pattern fileId_filename
-            if (!file.exists()) {
-                File[] allFiles = downloadsDir.listFiles();
-                if (allFiles != null) {
-                    for (File f : allFiles) {
-                        // Pattern: fileId_filename hoặc filename
-                        if (f.getName().endsWith(fileName) || f.getName().contains(fileName)) {
-                            file = f;
-                            break;
-                        }
-                    }
-                }
-            }
-            
-            if (file.exists()) {
-                // Open file with default application
-                if (java.awt.Desktop.isDesktopSupported()) {
-                    java.awt.Desktop.getDesktop().open(file);
-                    System.out.println("✅ Opened file: " + file.getAbsolutePath());
-                } else {
-                    showAlert("Error", "Cannot open file on this system");
-                }
-            } else {
-                showAlert("Error", "File not found: " + fileName + "\n" +
-                          "Searched in: " + downloadsDir.getAbsolutePath());
-                System.err.println("❌ File not found. Searched in: " + downloadsDir.getAbsolutePath());
-            }
+
+            Desktop.getDesktop().open(file);
+            System.out.println("✅ Opened file: " + file.getAbsolutePath());
+
         } catch (Exception e) {
             showAlert("Error", "Failed to open file: " + e.getMessage());
             e.printStackTrace();
         }
     }
+
+
+
+
     
 
     // ===== MESSAGE RENDERING =====
@@ -1244,7 +1438,7 @@ public class ChatWindow {
     // Check if message has file attachment
     if (msg.getImageUrl() != null && msg.getImageUrl().startsWith("file://")) {
         // This is a file message
-        VBox fileBox = createFileMessageBox(msg.getImageUrl(), isOwn);
+        VBox fileBox = createFileMessageBox(msg, isOwn);
         bubble.getChildren().add(fileBox);
     } else {
         // Regular text message
@@ -1578,16 +1772,41 @@ public class ChatWindow {
     	            Platform.runLater(() -> {
     	                closeFileProgressDialog(fileId);
 
+    	             // ================== SENDER ==================
     	                if (isUpload) {
-    	                	// ✅ SENDER: Tạo message SAU KHI GỬI XONG
-    	                	showSuccessNotification("File sent successfully!");
-    	                    System.out.println("✅ Sender: File sent complete (1 log only)");
-    	                    
-                            if (currentConversation != null) {
-                                reloadCurrentConversationMessages();
-                            }
+    	                	File originalFile = pendingUploadFiles.remove(fileId);
 
-                            return;
+    	                    if (originalFile == null) {
+    	                        System.err.println("❌ SENDER: originalFile not found for fileId=" + fileId);
+    	                        return;
+    	                    }
+    	                    
+//    	                    Message msg = chatService.createFileMessage(
+//    	                            currentConversation.getId(),
+//    	                            currentUserId,
+//    	                            originalFile.getName(),
+//    	                            "file://" + originalFile.getName() + "|" +
+//    	                            formatFileSize(originalFile.length())
+//    	                        );
+//
+//    	                    try {
+//								chatService.createFileAttachment(
+//								    msg,
+//								    currentUserId,
+//								    file,
+//								    fileId
+//								);
+//							} catch (IOException e) {
+//								// TODO Auto-generated catch block
+//								e.printStackTrace();
+//							}
+
+    	                 // UI chỉ nhận callback
+    	                    //displayFileMessage(msg);
+    	                    
+    	                    showSuccessNotification("File sent successfully!");
+    	                    reloadCurrentConversationMessages();
+    	                    return;
     	                }
 
     	                //phía receiver 
@@ -1601,37 +1820,30 @@ public class ChatWindow {
     	                    showAlert("Error", "Received file not found on disk");
     	                    return;
     	                }
-
-    	             // ✅ RECEIVER: Tạo message CHỈ KHI CÓ FILE
-//    	                if (currentConversation != null) {
-//    	                    String fileUrl = "file://" + file.getName() + "|" +
-//    	                                    formatFileSize(file.length());
-//
-//    	                    // ✅ SỬ DỤNG sender ID từ file metadata
-//    	                    Message fileMsg = chatService.sendMessage(
-//    	                        currentConversation.getId(),
-//    	                        currentChatUser.getId(), // sender ID
-//    	                        "[File] " + file.getName(),
-//    	                        fileUrl
-//    	                    );
-//
-//    	                    if (fileMsg != null) {
-//    	                        displayMessage(fileMsg, false);
-//    	                    }
-//    	                }
-
-                        // if (isUpload) {
-                            showSuccessNotification("File received: " + file.getName());
-                            System.out.println("✅ Sender: File sent complete (1 log only)");
-                            
-                            // ✅ Reload messages để đảm bảo message hiển thị
-                            if (currentConversation != null) {
-                                reloadCurrentConversationMessages();
-                            } else {
-                                System.out.println("✅ File received but conversation not open. Message saved to DB.");
-                            }
-                         
-                        // }
+    	                
+                        // ✅ RECEIVER: File đã được nhận và message đã được tạo trong FileTransferController
+                        showSuccessNotification("File received: " + (file != null ? file.getName() : "file"));
+                        System.out.println("✅ [ChatWindow] RECEIVER: File received notification");
+                        
+                        // ✅ Reload messages để đảm bảo message hiển thị (ngay cả khi conversation đang mở)
+                        if (currentConversation != null) {
+                            // Delay nhỏ để đảm bảo DB đã commit
+                            new Thread(() -> {
+                                try {
+                                    Thread.sleep(200); // Đợi 200ms để DB commit
+                                    Platform.runLater(() -> {
+                                        if (currentConversation != null) {
+                                            reloadCurrentConversationMessages();
+                                            System.out.println("✅ [ChatWindow] RECEIVER: Reloaded messages after file receive");
+                                        }
+                                    });
+                                } catch (InterruptedException e) {
+                                    Thread.currentThread().interrupt();
+                                }
+                            }).start();
+                        } else {
+                            System.out.println("✅ [ChatWindow] RECEIVER: File received but conversation not open. Message saved to DB.");
+                        }
     	            });
     	        }
 
@@ -1886,34 +2098,22 @@ public class ChatWindow {
 
 	    try {
 	        // Generate client message ID for idempotent sending
-	        String clientMessageId = UUID.randomUUID().toString();
+	        String clientMessageId = UUID.randomUUID().toString(); 
+	        String fileId = UUID.randomUUID().toString();
 	        
-	        
-	        String fileUrl = "file://" + file.getName() + "|" + formatFileSize(file.length());
-	        Message fileMsg = chatService.sendFileMessageIdempotent(
-	            currentConversation.getId(),
-	            currentUserId,
-	            file.getName(),
-	            fileUrl,
-	            clientMessageId
-	        );
-	        
-	       
-	        if (fileMsg != null) {
-	            displayMessage(fileMsg, true);
-	            System.out.println("✅ SENDER: Displayed file message in UI");
-	        }
-	        
-	       
-	        String fileId = p2pManager.sendFile(
+	        String sentFileId = p2pManager.sendFile(
 	            targetUserId,
 	            file,
 	            currentConversation.getId(),
-	            clientMessageId
+	            clientMessageId,
+	            fileId    
 	        );
 	        
+	     // ⭐ LƯU FILE GỐC
+	        pendingUploadFiles.put(fileId, file);
+	        
 	        // Show progress dialog
-	        showFileProgressDialog(fileId, file.getName(), true);
+	        showFileProgressDialog(sentFileId, file.getName(), true);
 	        
 	    } catch (Exception e) {
 	        showAlert("Error", "Failed to send file: " + e.getMessage());

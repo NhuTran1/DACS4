@@ -1,13 +1,18 @@
 package service;
 
+import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
 
 import dao.ConversationDao;
+import dao.FileAttachmentDao;
 import dao.MessageDao;
 import dao.UserDao;
 import model.Conversation;
+import model.FileAttachment;
 import model.Message;
 import model.Users;
 import model.Message.MessageStatus;
@@ -18,7 +23,8 @@ public class MessageService {
     private MessageDao messageDao = new MessageDao();
     private ConversationDao conversationDao = new ConversationDao();
     private UserDao userDao = new UserDao();
-
+    private FileAttachmentDao fileAttachmentDao = new FileAttachmentDao();
+    
     // ===== IDEMPOTENT MESSAGE SENDING =====
     
     /**
@@ -110,6 +116,8 @@ public class MessageService {
         return sendMessageIdempotent(conversationId, senderId, content, imageUrl, 
                                      type, clientMessageId);
     }
+    
+    
     
     public void markMessageSentByClientId(String clientMessageId) {
         messageDao.updateMessageStatusByClientId(
@@ -240,6 +248,10 @@ public class MessageService {
             messageDao.resetUnread(msg.getConversation().getId(), userId);
         }
     }
+    
+    public Message findMessageByFileUrl(Integer conversationId, String fileUrl) {
+        return messageDao.findMessageByFileUrl(conversationId, fileUrl);
+    }
 
     /**
      * Reset unread count khi user mở cuộc chat
@@ -299,6 +311,125 @@ public class MessageService {
         
         return new MessageStats(textCount, fileCount, imageCount, audioCount);
     }
+    
+    public Message createFileMessage(
+            Integer conversationId,
+            Integer senderId,
+            String fileName,
+            String fileUrl
+    ) {
+        Message msg = new Message();
+        msg.setConversation(conversationDao.getConversation(conversationId));
+        msg.setSender(userDao.findById(senderId));
+        msg.setMessageType(Message.MessageType.FILE);
+        msg.setContent("[File] " + fileName);
+        msg.setImageUrl(fileUrl);
+        msg.setStatus(Message.MessageStatus.SENT);
+
+        messageDao.saveMessage(msg); // ⚠️ BẮT BUỘC
+        return msg;
+    }
+
+    public FileAttachment createFileAttachment(
+            Message msg,
+            Integer senderId,
+            File file,
+            String fileId
+    ) throws IOException {
+        FileAttachment fa = new FileAttachment();
+        fa.setMessage(msg);                 // ⭐ GẮN message
+        fa.setSender(userDao.findById(senderId));
+        fa.setFileId(fileId);               // UUID / P2P id
+        fa.setFileName(file.getName());
+        fa.setFilePath(file.getAbsolutePath());
+        fa.setFileSize(file.length());
+        fa.setMimeType(Files.probeContentType(file.toPath()));
+        fa.setStatus(FileAttachment.FileStatus.UPLOADING);
+
+        fileAttachmentDao.save(fa);
+        return fa;
+    }
+    
+    public Message createFileMessageWithAttachment(
+            Integer conversationId,
+            Integer senderId,
+            File file,
+            String fileId
+    ) throws IOException {
+    	
+//    	if (file == null || !file.exists()) {
+//            throw new IllegalArgumentException(
+//                "createFileMessageWithAttachment: file is null or not exists"
+//            );
+//        }
+    	
+        // 1. Create Message (SAVE TRƯỚC)
+        Message msg = new Message();
+        msg.setConversation(conversationDao.getConversation(conversationId));
+        msg.setSender(userDao.findById(senderId));
+        msg.setMessageType(Message.MessageType.FILE);
+        msg.setContent("[File] " + file.getName());
+        msg.setStatus(Message.MessageStatus.SENT);
+
+        messageDao.saveMessage(msg); // ⚠️ bắt buộc
+
+        // 2. Create FileAttachment
+        FileAttachment fa = new FileAttachment();
+        fa.setMessage(msg);
+        fa.setSender(msg.getSender());
+        fa.setFileId(fileId);
+        fa.setFileName(file.getName());
+        fa.setFilePath(file.getAbsolutePath());
+        fa.setFileSize(file.length());
+        fa.setMimeType(Files.probeContentType(file.toPath()));
+        fa.setStatus(FileAttachment.FileStatus.COMPLETED);
+
+        fileAttachmentDao.save(fa);
+
+        // 3. Link ngược (khuyến nghị)
+        msg.setFileAttachment(fa);
+        messageDao.update(msg);
+
+        
+        return msg;
+    }
+
+    //chi lưu thôi ko đụng đến P2P
+    public FileAttachment saveFileMessageAndAttachment(
+            Integer conversationId,
+            Integer senderId,
+            File file,
+            String fileId,
+            String clientMessageId
+    ) throws Exception {
+
+        // 1️⃣ Create Message
+        Message msg = new Message();
+        msg.setConversation(conversationDao.getConversation(conversationId));
+        msg.setSender(userDao.findById(senderId));
+        msg.setMessageType(Message.MessageType.FILE);
+        msg.setContent("[File] " + file.getName());
+        msg.setClientMessageId(clientMessageId);
+        msg.setStatus(Message.MessageStatus.PENDING);
+
+        messageDao.saveMessage(msg); // ⚠️ DB ONLY
+
+        // 2️⃣ Create FileAttachment
+        FileAttachment fa = new FileAttachment();
+        fa.setMessage(msg);
+        fa.setSender(msg.getSender());
+        fa.setFileId(fileId);
+        fa.setFileName(file.getName());
+        fa.setFilePath(file.getAbsolutePath());
+        fa.setFileSize(file.length());
+        fa.setMimeType(Files.probeContentType(file.toPath()));
+        fa.setStatus(FileAttachment.FileStatus.UPLOADING);
+
+        fileAttachmentDao.save(fa); // ⚠️ DB ONLY
+
+        return fa;
+    }
+
 
     // Stats class
     public static class MessageStats {
