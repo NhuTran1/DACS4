@@ -63,7 +63,7 @@ public class ChatWindow {
     private Map<Integer, Circle> userStatusIndicators = new HashMap<>();
  // ChatWindow field
     private final Map<String, File> pendingUploadFiles = new ConcurrentHashMap<>();
-
+    private final Map<String, String> pendingClientMessageIds = new ConcurrentHashMap<>();
     
     // ✅ Shutdown management
     private javafx.animation.Timeline statusRefreshTimeline;
@@ -1082,6 +1082,13 @@ public class ChatWindow {
         return btn;
     }
     
+    private String humanReadableSize(long bytes) {
+        if (bytes < 1024) return bytes + " B";
+        int exp = (int) (Math.log(bytes) / Math.log(1024));
+        String pre = "KMGTPE".charAt(exp - 1) + "B";
+        return String.format("%.1f %s", bytes / Math.pow(1024, exp), pre);
+    }
+
     
  // ===== NEW: Create file message box =====
     private VBox createFileMessageBox(Message msg, boolean isOwn) {
@@ -1092,11 +1099,17 @@ public class ChatWindow {
             -fx-padding: 12;
         """);
         
-        String fileUrl = msg.getImageUrl(); // chỉ dùng để parse name/size
+        FileAttachment fa = msg.getFileAttachment();
+        if (fa == null) {
+            Label err = new Label("⚠ File attachment missing");
+            err.setTextFill(Color.RED);
+            fileBox.getChildren().add(err);
+            return fileBox;
+        }
         		
         // Parse file info from URL
-        String fileName = extractFileName(fileUrl);
-        String fileSize = extractFileSize(fileUrl);
+        String fileName = fa.getFileName();               // ✅ ĐÚNG
+        String fileSize = humanReadableSize(fa.getFileSize());
         
         HBox fileHeader = new HBox(10);
         fileHeader.setAlignment(Pos.CENTER_LEFT);
@@ -1773,44 +1786,62 @@ public class ChatWindow {
     	            Platform.runLater(() -> {
     	                closeFileProgressDialog(fileId);
 
-    	                // ===== SENDER =====
+    	                // ===== SENDER SIDE =====
     	                if (isUpload) {
     	                    File originalFile = pendingUploadFiles.remove(fileId);
+    	                    String clientMessageId = pendingClientMessageIds.remove(fileId);
 
     	                    if (originalFile == null) {
-    	                        System.err.println("❌ SENDER: originalFile not found");
+    	                        System.err.println("❌ SENDER: originalFile not found for fileId=" + fileId);
     	                        return;
     	                    }
     	                    
-    	                    // ✅ Hiển thị thông báo thành công
+    	                    System.out.println("✅ [Sender] File upload completed: " + originalFile.getName());
+    	                    
+    	                    // ✅ FIX: Update file attachment status to COMPLETED
+    	                    try {
+    	                        FileAttachmentDao fileDao = new FileAttachmentDao();
+    	                        boolean updated = fileDao.updateStatusByFileId(
+    	                            fileId, 
+    	                            FileAttachment.FileStatus.COMPLETED
+    	                        );
+    	                        
+    	                        if (updated) {
+    	                            System.out.println("✅ FileAttachment status updated to COMPLETED");
+    	                        } else {
+    	                            System.err.println("⚠️ Failed to update FileAttachment status");
+    	                        }
+    	                        
+    	                        // ✅ Update message status to SENT
+    	                        if (clientMessageId != null) {
+    	                            Message msg = chatService.findByClientMessageId(clientMessageId);
+    	                            if (msg != null) {
+    	                                dao.MessageDao messageDao = new dao.MessageDao();
+    	                                boolean msgUpdated = messageDao.updateMessageStatus(
+    	                                    msg.getId(), 
+    	                                    Message.MessageStatus.SENT
+    	                                );
+    	                                
+    	                                if (msgUpdated) {
+    	                                    System.out.println("✅ Message status updated to SENT");
+    	                                }
+    	                            } else {
+    	                                System.err.println("⚠️ Message not found for clientMessageId: " + clientMessageId);
+    	                            }
+    	                        }
+    	                        
+    	                    } catch (Exception e) {
+    	                        System.err.println("⚠️ Failed to update status: " + e.getMessage());
+    	                        e.printStackTrace();
+    	                    }
+    	                    
+    	                    // ✅ Show success notification
     	                    showSuccessNotification("✅ File sent: " + originalFile.getName());
     	                    
-    	                    // ✅ Reload messages để hiển thị
-    	                    reloadCurrentConversationMessages();
-    	                    return;
-    	                }
-
-    	                // ===== RECEIVER =====
-    	                if (file == null) {
-    	                    showAlert("Error", "File received but file object is null");
-    	                    return;
-    	                }
-
-    	                if (!file.exists()) {
-    	                    showAlert("Error", "Received file not found on disk");
-    	                    return;
-    	                }
-    	                
-    	                // ✅ Hiển thị thông báo file nhận thành công
-    	                showSuccessNotification("✅ File received: " + file.getName());
-    	                System.out.println("✅ File saved to: " + file.getAbsolutePath());
-    	                
-    	                // ✅ Reload messages để hiển thị
-    	                if (currentConversation != null) {
-    	                    // Delay nhỏ để đảm bảo DB đã commit
+    	                    // ✅ Reload messages với delay để đảm bảo DB đã commit
     	                    new Thread(() -> {
     	                        try {
-    	                            Thread.sleep(300);
+    	                            Thread.sleep(200); // Wait for DB commit
     	                            Platform.runLater(() -> {
     	                                if (currentConversation != null) {
     	                                    reloadCurrentConversationMessages();
@@ -1820,7 +1851,40 @@ public class ChatWindow {
     	                            Thread.currentThread().interrupt();
     	                        }
     	                    }).start();
+    	                    
+    	                    return;
     	                }
+
+    	                // ===== RECEIVER SIDE =====
+    	                if (file == null) {
+    	                    showAlert("Error", "File received but file object is null");
+    	                    return;
+    	                }
+
+    	                if (!file.exists()) {
+    	                    showAlert("Error", "Received file not found on disk: " + file.getAbsolutePath());
+    	                    return;
+    	                }
+    	                
+    	                System.out.println("✅ [Receiver] File received: " + file.getName());
+    	                System.out.println("   - Path: " + file.getAbsolutePath());
+    	                
+    	                // ✅ Show success notification
+    	                showSuccessNotification("✅ File received: " + file.getName());
+    	                
+    	                // ✅ Reload messages với delay để đảm bảo DB đã commit
+    	                new Thread(() -> {
+    	                    try {
+    	                        Thread.sleep(300); // Wait longer for receiver's DB commit
+    	                        Platform.runLater(() -> {
+    	                            if (currentConversation != null) {
+    	                                reloadCurrentConversationMessages();
+    	                            }
+    	                        });
+    	                    } catch (InterruptedException e) {
+    	                        Thread.currentThread().interrupt();
+    	                    }
+    	                }).start();
     	            });
     	        }
 
@@ -2055,6 +2119,32 @@ public class ChatWindow {
     }
 }
 
+// ChatWindow.java
+private void reloadCurrentConversationMessages() {
+    if (currentConversation == null) return;
+
+    Platform.runLater(() -> {
+        messageArea.getChildren().clear();
+
+        List<Message> messages =
+            chatService.listMessages(currentConversation.getId());
+
+        for (Message msg : messages) {
+            boolean isOwn =
+                msg.getSender().getId().equals(currentUserId);
+
+            displayMessage(msg, isOwn);
+
+            if (!isOwn && msg.getStatus() != Message.MessageStatus.DELIVERED) {
+                chatController.markMessageAsSeen(msg.getId());
+            }
+        }
+
+        System.out.println("✅ Reloaded " + messages.size() + " messages");
+    });
+}
+
+
    private void sendFileToConversation(File file) {
 	    if (currentConversation == null) return;
 	    
@@ -2078,6 +2168,33 @@ public class ChatWindow {
 	        String clientMessageId = UUID.randomUUID().toString(); 
 	        String fileId = UUID.randomUUID().toString();
 	        
+	     // ✅ FIX 1: LƯU DB TRƯỚC KHI GỬI P2P
+	        System.out.println("💾 Saving file to database...");
+	        FileAttachment savedAttachment = chatService.saveFileMessageAndAttachment(
+	            currentConversation.getId(),
+	            currentUserId,
+	            file,
+	            fileId,
+	            clientMessageId
+	        );
+	        
+	        if (savedAttachment == null) {
+	            showAlert("Error", "Failed to save file to database");
+	            return;
+	        }
+	        
+	        
+	        System.out.println("✅ File saved to DB - Message ID: " + 
+	                         savedAttachment.getMessage().getId() + 
+	                         ", FileAttachment ID: " + savedAttachment.getId());
+	        
+	        // ✅ LƯU FILE GỐC và clientMessageId để reference sau
+	        pendingUploadFiles.put(fileId, file);
+	        pendingClientMessageIds.put(fileId, clientMessageId);
+	        
+	        // ✅ HIỂN thị message ngay lập tức trên UI (optimistic update)
+	        reloadCurrentConversationMessages();
+	        
 	        String sentFileId = p2pManager.sendFile(
 	            targetUserId,
 	            file,
@@ -2087,7 +2204,7 @@ public class ChatWindow {
 	        );
 	        
 	     // ⭐ LƯU FILE GỐC
-	        pendingUploadFiles.put(fileId, file);
+	       // pendingUploadFiles.put(fileId, file);
 	        
 	        // Show progress dialog
 	        showFileProgressDialog(sentFileId, file.getName(), true);
@@ -2436,25 +2553,15 @@ private class AudioCallDialog extends Stage {
     }
     
  // ===== HELPER METHOD: Reload messages =====
-    private void reloadCurrentConversationMessages() {
+    public void reloadCurrentConversationMessages() {
         if (currentConversation == null) return;
-        
-        // Clear and reload
-        messageArea.getChildren().clear();
-        List<Message> messages = chatService.listMessages(currentConversation.getId());
-        
-        for (Message msg : messages) {
-            boolean isOwn = msg.getSender().getId().equals(currentUserId);
-            displayMessage(msg, isOwn);
-            
-            // Auto mark as seen if not own message
-            if (!isOwn && msg.getStatus() != Message.MessageStatus.DELIVERED) {
-                chatController.markMessageAsSeen(msg.getId());
-            }
-        }
-        
-        System.out.println("✅ Reloaded " + messages.size() + " messages");
+
+        List<Message> messages =
+            chatController.getMessages(currentConversation.getId());
+
+        renderMessages(messages);
     }
+
 
     // ===== HELPER METHOD: Show success notification =====
     private void showSuccessNotification(String message) {
@@ -2495,6 +2602,42 @@ private class AudioCallDialog extends Stage {
             fade.play();
         }
     }
+    
+//    public void reloadCurrentConversationMessages() {
+//        if (currentConversation == null) return;
+//
+//        List<Message> messages =
+//            chatController.getMessages(currentConversation.getId());
+//
+//        renderMessages(messages);
+//    }
+
+    
+    public void renderMessages(List<Message> messages) {
+    	messageArea.getChildren().clear();
+
+        for (Message msg : messages) {
+            if (msg.getMessageType() == Message.MessageType.FILE) {
+                renderFileMessage(msg);
+            }}
+    }
+
+    
+    private void renderFileMessage(Message msg) {
+        FileAttachment fa = msg.getFileAttachment();
+
+        if (fa == null) {
+            System.err.println("⚠️ FILE message without attachment: " + msg.getId());
+            return;
+        }
+
+        Button openBtn = new Button("📎 " + fa.getFileName());
+        openBtn.setOnAction(e -> openFile(msg));
+
+        messageArea.getChildren().add(openBtn);
+    }
+
+
     
     private void updateTimer() {
         long elapsed = (System.currentTimeMillis() - callStartTime) / 1000;

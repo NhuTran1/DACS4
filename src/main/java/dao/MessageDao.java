@@ -228,11 +228,14 @@ public class MessageDao {
 	//Đánh dấu tin nhắn đã đọc cho 1 user
 	public void markMessageSeen(Integer messageId, Integer userId) {
 	    Transaction tx = null;
-
-	    try (Session session = HibernateUtil.getSessionFactory().openSession()) {
+	    Session session = null;
+	    
+	    try {
+	        // ✅ FIX: Explicit session management
+	        session = HibernateUtil.getSessionFactory().openSession();
 	        tx = session.beginTransaction();
 
-	        // 1️⃣ Check tồn tại (native query an toàn)
+	        // 1️⃣ Check existence với native query an toàn
 	        String checkSql = """
 	            SELECT 1
 	            FROM message_seen
@@ -246,21 +249,46 @@ public class MessageDao {
 	                .uniqueResult();
 
 	        if (exists == null) {
+	            // 2️⃣ Chỉ insert nếu chưa tồn tại
 	            MessageSeen seen = new MessageSeen();
-
-	            // 2️⃣ DÙNG getReference (KHÔNG query DB)
+	            
+	            // ✅ Dùng getReference để tránh lazy loading issue
 	            seen.setMessage(session.getReference(Message.class, messageId));
 	            seen.setUser(session.getReference(Users.class, userId));
-
+	            seen.setSeenAt(java.time.LocalDateTime.now());
+	            
 	            session.persist(seen);
+	            
+	            System.out.println("✅ Marked message " + messageId + " as seen by user " + userId);
+	        } else {
+	            System.out.println("⚠️ Message " + messageId + " already marked as seen by user " + userId);
 	        }
 
+	        // ✅ CRITICAL: Commit TRƯỚC KHI đóng session
 	        tx.commit();
-
+	        
 	    } catch (Exception e) {
-	        if (tx != null) tx.rollback();
+	        // ✅ FIX: Proper rollback handling
+	        if (tx != null && tx.isActive()) {
+	            try {
+	                tx.rollback();
+	                System.err.println("⚠️ Transaction rolled back");
+	            } catch (Exception rollbackEx) {
+	                System.err.println("⚠️ Rollback failed: " + rollbackEx.getMessage());
+	            }
+	        }
 	        System.err.println("❌ Error marking message as seen: " + e.getMessage());
 	        e.printStackTrace();
+	        
+	    } finally {
+	        // ✅ FIX: Always close session in finally block
+	        if (session != null && session.isOpen()) {
+	            try {
+	                session.close();
+	            } catch (Exception closeEx) {
+	                System.err.println("⚠️ Session close failed: " + closeEx.getMessage());
+	            }
+	        }
 	    }
 	}
 
@@ -463,6 +491,28 @@ public class MessageDao {
 	        e.printStackTrace();
 	    }
 	}
+	
+	public List<Message> listMessagesWithAttachments(Integer conversationId) {
+	    Session session = HibernateUtil.getSessionFactory().openSession();
+	    try {
+	        String sql = """
+	            SELECT DISTINCT m.*
+	            FROM message m
+	            LEFT JOIN file_attachment fa ON fa.message_id = m.id
+	            WHERE m.conversation_id = :cid
+	            ORDER BY m.created_at ASC
+	        """;
+
+	        return session
+	            .createNativeQuery(sql, Message.class)
+	            .setParameter("cid", conversationId)
+	            .getResultList();
+
+	    } finally {
+	        session.close();
+	    }
+	}
+
 
 
 

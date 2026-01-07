@@ -546,6 +546,35 @@ public class ChatController {
 //            }
         });
     }
+    
+    /**
+     * Reload messages của 1 conversation
+     * (UI gọi, Controller chỉ fetch DB)
+     */
+    public void reloadConversationMessages(
+            Integer conversationId,
+            Consumer<List<Message>> callback
+    ) {
+        if (conversationId == null) return;
+
+        try {
+            List<Message> messages = chatService.listMessages(conversationId);
+
+            // reset unread cho user hiện tại
+            chatService.resetUnread(conversationId, currentUserId);
+
+            if (callback != null) {
+                callback.accept(messages);
+            }
+        } catch (Exception e) {
+            System.err.println("❌ Reload messages failed: " + e.getMessage());
+            if (callback != null) {
+                callback.accept(List.of());
+            }
+        }
+    }
+
+
 
     // ===== RESULT CLASS =====
     

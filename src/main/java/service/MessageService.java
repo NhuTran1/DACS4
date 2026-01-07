@@ -16,6 +16,7 @@ import dao.ConversationDao;
 import dao.FileAttachmentDao;
 import dao.MessageDao;
 import dao.UserDao;
+import jakarta.transaction.Transactional;
 import model.Conversation;
 import model.FileAttachment;
 import model.Message;
@@ -363,50 +364,68 @@ public class MessageService {
     	    String fileId
     	) throws IOException {
     	    
-    	    // Đảm bảo chạy trong 1 Transaction (Hibernate Session)
-    	    Session session = sessionFactory.getCurrentSession(); 
-    	    Transaction tx = null;
-    	    try {
-    	        tx = session.beginTransaction();
-
-    	        // 1️⃣ Tạo Message
-    	        Message msg = new Message();
-    	        msg.setConversation(conversationDao.getConversation(conversationId));
-    	        msg.setSender(userDao.findById(senderId));
-    	        msg.setMessageType(Message.MessageType.FILE);
-    	        msg.setContent("[File] " + file.getName());
-    	        msg.setStatus(Message.MessageStatus.SENT);
-
-    	        session.save(msg); // Lưu message lấy ID
-
-    	        // 2️⃣ Tạo FileAttachment
-    	        FileAttachment fa = new FileAttachment();
-    	        fa.setMessage(msg);
-    	        fa.setSender(msg.getSender());
-    	        fa.setFileId(fileId);
-    	        fa.setFileName(file.getName());
-    	        fa.setFilePath(file.getAbsolutePath()); // Đường dẫn tuyệt đối cục bộ
-    	        fa.setFileSize(file.length());
-    	        fa.setMimeType(Files.probeContentType(file.toPath()));
-    	        fa.setStatus(FileAttachment.FileStatus.COMPLETED);
-
-    	        session.save(fa);
-
-    	        // 3️⃣ Liên kết và Flush
-    	        msg.setFileAttachment(fa);
-    	        session.update(msg);
-    	        
-    	        session.flush(); // ⚡ Ép Hibernate ghi xuống DB ngay lập tức
-    	        tx.commit();     // Chốt dữ liệu
-    	        
-    	        return msg;
-    	    } catch (Exception e) {
-    	        if (tx != null) tx.rollback();
-    	        throw e;
+    	    System.out.println("💾 [MessageService] Creating file message for receiver...");
+    	    System.out.println("   - File: " + file.getName());
+    	    System.out.println("   - Path: " + file.getAbsolutePath());
+    	    
+    	    // ✅ FIX: Không dùng sessionFactory, dùng DAO methods
+    	    
+    	    // 1️⃣ Validate
+    	    if (!file.exists()) {
+    	        throw new IOException("File does not exist: " + file.getAbsolutePath());
     	    }
+
+    	    // 2️⃣ Create Message
+    	    Message msg = new Message();
+    	    msg.setConversation(conversationDao.getConversation(conversationId));
+    	    msg.setSender(userDao.findById(senderId));
+    	    msg.setMessageType(Message.MessageType.FILE);
+    	    msg.setContent("[File] " + file.getName());
+    	    msg.setStatus(Message.MessageStatus.SENT); // ⭐ Receiver nhận được = SENT
+    	    msg.setCreatedAt(LocalDateTime.now());
+    	    msg.setUpdatedAt(LocalDateTime.now());
+
+    	    messageDao.saveMessage(msg);
+
+    	    if (msg.getId() == null) {
+    	        throw new IOException("Failed to save message");
+    	    }
+    	    
+    	    System.out.println("✅ Receiver message saved with ID: " + msg.getId());
+
+    	    // 3️⃣ Create FileAttachment
+    	    FileAttachment fa = new FileAttachment();
+    	    fa.setMessage(msg);
+    	    fa.setSender(msg.getSender());
+    	    fa.setFileId(fileId);
+    	    fa.setFileName(file.getName());
+    	    fa.setFilePath(file.getAbsolutePath());
+    	    fa.setFileSize(file.length());
+    	    
+    	    try {
+    	        String mimeType = Files.probeContentType(file.toPath());
+    	        fa.setMimeType(mimeType != null ? mimeType : "application/octet-stream");
+    	    } catch (IOException e) {
+    	        fa.setMimeType("application/octet-stream");
+    	    }
+    	    
+    	    fa.setStatus(FileAttachment.FileStatus.COMPLETED); // ⭐ COMPLETED khi receiver nhận xong
+    	    fa.setCreatedAt(LocalDateTime.now());
+    	    fa.setUpdatedAt(LocalDateTime.now());
+
+    	    FileAttachment saved = fileAttachmentDao.save(fa);
+    	    
+    	    if (saved == null) {
+    	        throw new IOException("Failed to save file attachment");
+    	    }
+    	    
+    	    System.out.println("✅ Receiver FileAttachment saved with ID: " + saved.getId());
+
+    	    return msg;
     	}
 
     //chi lưu thôi ko đụng đến P2P
+ // ===== FIX: saveFileMessageAndAttachment =====
     public FileAttachment saveFileMessageAndAttachment(
             Integer conversationId,
             Integer senderId,
@@ -415,18 +434,44 @@ public class MessageService {
             String clientMessageId
     ) throws Exception {
 
-        // 1️⃣ Create Message
+        System.out.println("💾 [MessageService] Saving file message to DB...");
+        System.out.println("   - File: " + file.getName());
+        System.out.println("   - FileId: " + fileId);
+        System.out.println("   - ClientMessageId: " + clientMessageId);
+
+        // ✅ FIX: Không dùng sessionFactory, dùng DAO methods
+        
+        // 1️⃣ Validate inputs
+        if (conversationId == null || senderId == null || file == null || 
+            fileId == null || clientMessageId == null) {
+            throw new IllegalArgumentException("Missing required parameters");
+        }
+        
+        if (!file.exists() || !file.isFile()) {
+            throw new IllegalArgumentException("File does not exist: " + file.getAbsolutePath());
+        }
+
+        // 2️⃣ Create Message
         Message msg = new Message();
         msg.setConversation(conversationDao.getConversation(conversationId));
         msg.setSender(userDao.findById(senderId));
         msg.setMessageType(Message.MessageType.FILE);
         msg.setContent("[File] " + file.getName());
         msg.setClientMessageId(clientMessageId);
-        msg.setStatus(Message.MessageStatus.PENDING);
+        msg.setStatus(Message.MessageStatus.PENDING); // ⭐ Pending khi mới tạo
+        msg.setCreatedAt(LocalDateTime.now());
+        msg.setUpdatedAt(LocalDateTime.now());
 
-        messageDao.saveMessage(msg); // ⚠️ DB ONLY
+        // ✅ Save message first
+        messageDao.saveMessage(msg);
 
-        // 2️⃣ Create FileAttachment
+        if (msg.getId() == null) {
+            throw new Exception("Failed to save message - ID is null");
+        }
+        
+        System.out.println("✅ Message saved with ID: " + msg.getId());
+
+        // 3️⃣ Create FileAttachment
         FileAttachment fa = new FileAttachment();
         fa.setMessage(msg);
         fa.setSender(msg.getSender());
@@ -434,13 +479,34 @@ public class MessageService {
         fa.setFileName(file.getName());
         fa.setFilePath(file.getAbsolutePath());
         fa.setFileSize(file.length());
-        fa.setMimeType(Files.probeContentType(file.toPath()));
-        fa.setStatus(FileAttachment.FileStatus.UPLOADING);
+        
+        try {
+            String mimeType = Files.probeContentType(file.toPath());
+            fa.setMimeType(mimeType != null ? mimeType : "application/octet-stream");
+        } catch (IOException e) {
+            fa.setMimeType("application/octet-stream");
+        }
+        
+        fa.setStatus(FileAttachment.FileStatus.UPLOADING); // ⭐ UPLOADING khi sender bắt đầu gửi
+        fa.setCreatedAt(LocalDateTime.now());
+        fa.setUpdatedAt(LocalDateTime.now());
 
-        fileAttachmentDao.save(fa); // ⚠️ DB ONLY
+        // ✅ Save file attachment
+        FileAttachment saved = fileAttachmentDao.save(fa);
+        
+        if (saved == null || saved.getId() == null) {
+            throw new Exception("Failed to save file attachment");
+        }
+        
+        System.out.println("✅ FileAttachment saved with ID: " + saved.getId());
 
-        return fa;
+        return saved;
     }
+    
+    public List<Message> reloadConversationMessages(Integer conversationId) {
+        return messageDao.listMessagesWithAttachments(conversationId);
+    }
+
 
 
     // Stats class
@@ -461,4 +527,7 @@ public class MessageService {
             return textCount + fileCount + imageCount + audioCount;
         }
     }
+    
+    
+
 }
