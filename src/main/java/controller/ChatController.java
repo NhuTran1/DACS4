@@ -9,6 +9,9 @@ import network.p2p.PeerConnection;
 import network.p2p.PeerInfo;
 import network.p2p.PeerDiscoveryService;
 
+import controller.SmartReplyController;
+
+
 import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
@@ -37,7 +40,7 @@ public class ChatController {
     private final Integer currentUserId;
     private final FileTransferController fileTransferController;
     //private final AudioController audioController;
-    
+    private final SmartReplyController smartReplyController;
    
     private MessageReceivedCallback messageReceivedCallback;
     private TypingCallback typingCallback;
@@ -69,9 +72,20 @@ public class ChatController {
         this.fileTransferController = new FileTransferController(p2pManager, chatService, currentUserId, this);
         //this.audioController = new AudioController(p2pManager, currentUserId);
         
+        this.smartReplyController =
+                new SmartReplyController(chatService, currentUserId);
+        
+        this.fileTransferController.setIncomingMessageCallback(
+                this::onNewIncomingMessage
+            );
+        
+        
         setupP2PListeners();
     }
 
+    public SmartReplyController getSmartReplyController() {
+        return smartReplyController;
+    }
     
     public FileTransferController getFileTransferController() {
         return fileTransferController;
@@ -573,6 +587,18 @@ public class ChatController {
             }
         }
     }
+    
+    public void onNewIncomingMessage(Message msg) {
+        if (msg == null) return;
+
+        if (messageReceivedCallback != null) {
+            messageReceivedCallback.onMessageReceived(
+                msg.getConversation().getId(),
+                msg
+            );
+        }
+    }
+
 
 
 

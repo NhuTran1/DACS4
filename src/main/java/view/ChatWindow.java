@@ -2,12 +2,14 @@ package view;
 
 import client.ClientManager;
 import controller.ChatController;
+import controller.SmartReplyController;
 import dao.FileAttachmentDao;
 import javafx.animation.FadeTransition;
 import javafx.animation.ScaleTransition;
 import javafx.application.Platform;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
+import javafx.geometry.Side;
 import javafx.scene.Scene;
 import javafx.scene.control.*;
 import javafx.scene.effect.DropShadow;
@@ -31,6 +33,7 @@ import service.ChatService;
 import java.awt.Desktop;
 import java.io.File;
 import java.io.IOException;
+import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -71,6 +74,13 @@ public class ChatWindow {
     
     private static final DateTimeFormatter TIME_FORMATTER = DateTimeFormatter.ofPattern("HH:mm");
 
+    
+ // ===== SMART REPLY UI =====
+    private HBox smartReplyBox;
+    private List<Button> smartReplyButtons = new ArrayList<>();
+    private SmartReplyController smartReplyController;
+
+    
     public ChatWindow(Stage stage, ChatService chatService, P2PManager p2pManager, 
                       Integer userId, ClientManager clientManager) {
         this.stage = stage;
@@ -79,6 +89,18 @@ public class ChatWindow {
         this.currentUserId = userId;
         this.chatController = new ChatController(chatService, p2pManager, userId);
         this.clientManager = clientManager;
+        
+        
+        chatController.setMessageReceivedCallback((conversationId, message) -> {
+            if (currentConversation == null) return;
+            if (!conversationId.equals(currentConversation.getId())) return;
+
+            Platform.runLater(() -> {
+                boolean isOwn = message.getSender().getId().equals(currentUserId);
+                displayMessage(message, isOwn);
+            });
+        });
+
         
         setupP2PListeners();
     }
@@ -188,19 +210,35 @@ public class ChatWindow {
         TextField searchField = createSearchField();
         
         // Update search placeholder when tab changes
+//        leftTabPane = new TabPane();
+//        leftTabPane.getSelectionModel().selectedItemProperty().addListener((obs, oldTab, newTab) -> {
+//            if (newTab != null) {
+//                String tabText = newTab.getText();
+//                if (tabText.contains("Friends")) {
+//                    searchField.setPromptText("🔍 Search friends...");
+//                } else if (tabText.contains("Groups")) {
+//                    searchField.setPromptText("🔍 Search groups...");
+//                } else if (tabText.contains("Online")) {
+//                    searchField.setPromptText("🔍 Search online users...");
+//                }
+//            }
+//        });
+        
         leftTabPane = new TabPane();
-        leftTabPane.getSelectionModel().selectedItemProperty().addListener((obs, oldTab, newTab) -> {
-            if (newTab != null) {
-                String tabText = newTab.getText();
-                if (tabText.contains("Friends")) {
-                    searchField.setPromptText("🔍 Search friends...");
-                } else if (tabText.contains("Groups")) {
-                    searchField.setPromptText("🔍 Search groups...");
-                } else if (tabText.contains("Online")) {
-                    searchField.setPromptText("🔍 Search online users...");
-                }
-            }
+        leftTabPane.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
+        leftTabPane.setSide(Side.TOP);
+
+        // Chia đều width cho 3 tab
+        leftTabPane.widthProperty().addListener((obs, oldW, newW) -> {
+            double tabWidth = newW.doubleValue() / 3.0;
+            leftTabPane.getTabs().forEach(tab ->
+                tab.setStyle(
+                    "-fx-pref-width: " + tabWidth + ";" +
+                    "-fx-max-width: " + tabWidth + ";"
+                )
+            );
         });
+
         
         // Dynamic search based on selected tab
         searchField.textProperty().addListener((obs, old, newVal) -> {
@@ -247,12 +285,14 @@ public class ChatWindow {
 
     // ===== TAB 1: ONLINE USERS =====
     private Tab createOnlineTab() {
-        Tab tab = new Tab("🌐");
+        Tab tab = new Tab("🌐 Online ");
         tab.setStyle("""
-            -fx-background-color: #262b40;
-            -fx-text-fill: #aaaaaa;
-            -fx-font-weight: bold;
-        """);
+        	    -fx-background-color: linear-gradient(to bottom, #2f80ed, #1c5fd4);
+        	    -fx-text-fill: white;
+        	    -fx-font-weight: bold;
+        	    -fx-font-size: 13px;
+        	""");
+
         
         VBox content = new VBox(7);
         content.setPadding(new Insets(10));
@@ -286,12 +326,14 @@ public class ChatWindow {
 
     // ===== TAB 2: FRIENDS =====
     private Tab createFriendTab() {
-        Tab tab = new Tab("👥");
+        Tab tab = new Tab("👥 Friends");
         tab.setStyle("""
-            -fx-background-color: #262b40;
-            -fx-text-fill: #aaaaaa;
-            -fx-font-weight: bold;
-        """);
+        	    -fx-background-color: linear-gradient(to bottom, #2f80ed, #1c5fd4);
+        	    -fx-text-fill: white;
+        	    -fx-font-weight: bold;
+        	    -fx-font-size: 13px;
+        	""");
+
         
         VBox content = new VBox(7);
         content.setPadding(new Insets(10));
@@ -334,12 +376,14 @@ public class ChatWindow {
 
     // ===== TAB 3: GROUPS =====
     private Tab createGroupTab() {
-        Tab tab = new Tab("💬");
+        Tab tab = new Tab("💬 Groups");
         tab.setStyle("""
-            -fx-background-color: #262b40;
-            -fx-text-fill: #aaaaaa;
-            -fx-font-weight: bold;
-        """);
+        	    -fx-background-color: linear-gradient(to bottom, #2f80ed, #1c5fd4);
+        	    -fx-text-fill: white;
+        	    -fx-font-weight: bold;
+        	    -fx-font-size: 13px;
+        	""");
+
         
         VBox content = new VBox(10);
         content.setPadding(new Insets(10));
@@ -865,24 +909,28 @@ public class ChatWindow {
     }
 
     // ===== CHAT AREA =====
+ // ===== CHAT AREA =====
     private VBox createChatArea() {
         VBox chatArea = new VBox();
-        chatArea.setStyle("-fx-background-color: #0a0e27;");
+        chatArea.setStyle("-fx-background-color: #0f172a;");
 
         // Chat header
         HBox chatHeader = createChatHeader();
-        
-        // Message area with gradient background
+
+        // Message area
         messageArea = new VBox(15);
         messageArea.setPadding(new Insets(25));
-        messageArea.setStyle("-fx-background-color: #0a0e27;");
-        
+        messageArea.setStyle("""
+        	    -fx-background-color: linear-gradient(to bottom, #020617, #020617);
+        	""");
+
+
         messageScrollPane = new ScrollPane(messageArea);
         messageScrollPane.setFitToWidth(true);
         messageScrollPane.setStyle("""
             -fx-background-color: transparent;
-            -fx-border-width: 0;
-            -fx-background: #0a0e27;
+		    -fx-background: #020617;
+		    -fx-border-width: 0;
         """);
         messageScrollPane.setVbarPolicy(ScrollPane.ScrollBarPolicy.AS_NEEDED);
         VBox.setVgrow(messageScrollPane, Priority.ALWAYS);
@@ -894,21 +942,28 @@ public class ChatWindow {
         typingIndicator.setPadding(new Insets(0, 0, 10, 25));
         typingIndicator.setVisible(false);
 
-        // Message input area
-        HBox inputArea = createInputArea();
+        // ✅ GỌI method, không khai báo
+        VBox inputArea = createInputArea();
 
-        chatArea.getChildren().addAll(chatHeader, messageScrollPane, typingIndicator, inputArea);
+        chatArea.getChildren().addAll(
+            chatHeader,
+            messageScrollPane,
+            typingIndicator,
+            inputArea
+        );
+
         return chatArea;
     }
+
 
     private HBox createChatHeader() {
         HBox header = new HBox(15);
         header.setPadding(new Insets(20, 25, 20, 25));
         header.setAlignment(Pos.CENTER_LEFT);
         header.setStyle("""
-            -fx-background-color: #1a1d2e;
-            -fx-border-color: #262b40;
-            -fx-border-width: 0 0 1 0;
+             -fx-background-color: linear-gradient(to right, #0f172a, #1e3a8a);
+	    -fx-border-color: #1e40af;
+	    -fx-border-width: 0 0 1.5 0;
         """);
 
         // Avatar with status indicator
@@ -921,7 +976,7 @@ public class ChatWindow {
         
         chatStatusLabel = new Label("Offline");
         chatStatusLabel.setFont(Font.font(13));
-        chatStatusLabel.setTextFill(Color.web("#6b7280"));
+        chatStatusLabel.setTextFill(Color.web("#93c5fd"));
         
         userInfo.getChildren().addAll(chatTitleLabel, chatStatusLabel);
 
@@ -929,50 +984,61 @@ public class ChatWindow {
         HBox.setHgrow(spacer, Priority.ALWAYS);
 
         // Action buttons (Ikonli)
-        Button callBtn = createIconButton("fas-phone", 40);
-        Button videoBtn = createIconButton("fas-video", 40);
+      //  Button callBtn = createIconButton("fas-phone", 40);
+       // Button videoBtn = createIconButton("fas-video", 40);
         Button infoBtn = createIconButton("fas-info-circle", 40);
 
-        callBtn.setOnAction(e -> handleVoiceCall());
-        videoBtn.setOnAction(e -> handleVoiceCall());
+       // callBtn.setOnAction(e -> handleVoiceCall());
+        //videoBtn.setOnAction(e -> handleVoiceCall());
         infoBtn.setOnAction(e -> showConversationInfo());
 
-        header.getChildren().addAll(avatarStack, userInfo, spacer, callBtn, videoBtn, infoBtn);
+        header.getChildren().addAll(avatarStack, userInfo, spacer, infoBtn);
         return header;
     }
 
-    private HBox createInputArea() {
+ // ===== INPUT AREA =====
+    private VBox createInputArea() {
+        VBox inputContainer = new VBox(8);
+        inputContainer.setPadding(new Insets(15, 25, 25, 25));
+        inputContainer.setStyle("-fx-background-color: #1e293b;");
+
+        // ===== Smart Reply Box =====
+        smartReplyBox = new HBox(8);
+        smartReplyBox.setAlignment(Pos.CENTER_LEFT);
+        smartReplyBox.setVisible(false);
+        smartReplyBox.setManaged(false);
+
+        // ===== Main Input Area =====
         HBox inputArea = new HBox(12);
-        inputArea.setPadding(new Insets(20, 25, 25, 25));
         inputArea.setAlignment(Pos.CENTER);
-        inputArea.setStyle("-fx-background-color: #1a1d2e;");
 
         Button attachBtn = createIconButton("fas-paperclip", 40);
-        Button audioBtn  = createIconButton("fas-microphone", 40);
-        Button emojiBtn = createIconButton("fas-smile", 40);
-        
+        Button emojiBtn  = createIconButton("fas-smile", 40);
+
         messageInput = new TextField();
         messageInput.setPromptText("Type a message...");
         messageInput.setPrefHeight(50);
         messageInput.setStyle("""
-            -fx-background-color: #262b40;
-            -fx-background-radius: 25;
-            -fx-text-fill: #ffffff;
-            -fx-prompt-text-fill: #6b7280;
-            -fx-border-width: 0;
-            -fx-padding: 0 20;
-            -fx-font-size: 14;
+            -fx-background-color: #0f172a;
+		    -fx-background-radius: 25;
+		    -fx-text-fill: #ffffff;
+		    -fx-prompt-text-fill: #94a3b8;
+		    -fx-padding: 0 20;
+		    -fx-font-size: 14;
         """);
         HBox.setHgrow(messageInput, Priority.ALWAYS);
 
-        // Typing indicator
-        messageInput.textProperty().addListener((obs, old, newVal) -> {
+        messageInput.textProperty().addListener((obs, oldVal, newVal) -> {
             if (currentConversation != null) {
-                if (!newVal.isEmpty() && old.isEmpty()) {
+                if (!newVal.isEmpty() && oldVal.isEmpty()) {
                     chatController.sendTypingStart(currentConversation.getId());
-                } else if (newVal.isEmpty() && !old.isEmpty()) {
+                } else if (newVal.isEmpty() && !oldVal.isEmpty()) {
                     chatController.sendTypingStop(currentConversation.getId());
                 }
+            }
+
+            if (!newVal.isEmpty()) {
+                hideSmartReplies();
             }
         });
 
@@ -984,9 +1050,97 @@ public class ChatWindow {
         attachBtn.setOnAction(e -> handleAttachment());
         emojiBtn.setOnAction(e -> showEmojiPicker());
 
-        inputArea.getChildren().addAll(attachBtn, emojiBtn, messageInput, sendBtn);
-        return inputArea;
+        inputArea.getChildren().addAll(
+            attachBtn,
+            emojiBtn,
+            messageInput,
+            sendBtn
+        );
+
+        inputContainer.getChildren().addAll(
+            smartReplyBox,
+            inputArea
+        );
+
+        return inputContainer;
     }
+
+
+    private void showSmartReplySuggestions(List<String> suggestions) {
+        smartReplyBox.getChildren().clear();
+        smartReplyButtons.clear();
+
+        if (suggestions == null || suggestions.isEmpty()) {
+            hideSmartReplies();
+            return;
+        }
+
+        for (String text : suggestions) {
+            Button btn = createSmartReplyButton(text);
+            smartReplyButtons.add(btn);
+            smartReplyBox.getChildren().add(btn);
+        }
+
+        smartReplyBox.setVisible(true);
+        smartReplyBox.setManaged(true);
+
+        FadeTransition fade = new FadeTransition(Duration.millis(200), smartReplyBox);
+        fade.setFromValue(0);
+        fade.setToValue(1);
+        fade.play();
+    }
+
+    private Button createSmartReplyButton(String text) {
+        Button btn = new Button(text);
+        btn.setStyle("""
+            -fx-background-color: #262b40;
+            -fx-text-fill: white;
+            -fx-background-radius: 18;
+            -fx-padding: 6 14;
+            -fx-border-color: #667eea;
+            -fx-border-radius: 18;
+            -fx-cursor: hand;
+        """);
+
+        btn.setOnAction(e -> {
+            sendSmartReply(text);
+            hideSmartReplies();
+        });
+
+        return btn;
+    }
+
+    private void sendSmartReply(String text) {
+        if (currentConversation == null || text.isBlank()) return;
+
+        chatController.sendMessage(
+            currentConversation.getId(),
+            text,
+            null
+        );
+
+        // Hiển thị ngay (optimistic UI)
+        Message temp = new Message();
+        temp.setContent(text);
+        temp.setSender(chatService.getUserById(currentUserId));
+        temp.setCreatedAt(LocalDateTime.now());
+
+        displayMessage(temp, true);
+    }
+
+    private void hideSmartReplies() {
+        if (!smartReplyBox.isVisible()) return;
+
+        FadeTransition fade = new FadeTransition(Duration.millis(150), smartReplyBox);
+        fade.setFromValue(1);
+        fade.setToValue(0);
+        fade.setOnFinished(e -> {
+            smartReplyBox.setVisible(false);
+            smartReplyBox.setManaged(false);
+        });
+        fade.play();
+    }
+
 
     // ===== HELPER UI METHODS =====
     private StackPane createAvatarWithStatus(String emoji, boolean isOnline, double size) {
@@ -1066,12 +1220,10 @@ public class ChatWindow {
         btn.setGraphic(icon);
 
         btn.setStyle("""
-            -fx-background-color: linear-gradient(to right, #667eea, #764ba2);
-            -fx-background-radius: 50%;
-            -fx-min-width: 50; -fx-min-height: 50;
-            -fx-max-width: 50; -fx-max-height: 50;
-            -fx-cursor: hand;
-            -fx-border-width: 0;
+            -fx-background-color: #3b82f6;
+    -fx-text-fill: white;
+    -fx-background-radius: 20;
+    -fx-font-weight: bold;
         """);
 
         DropShadow shadow = new DropShadow();
@@ -1438,13 +1590,13 @@ public class ChatWindow {
     
     if (isOwn) {
         bubble.setStyle("""
-            -fx-background-color: linear-gradient(to right, #667eea, #764ba2);
-            -fx-background-radius: 20 20 4 20;
+           -fx-background-color: linear-gradient(to right, #2563eb, #1d4ed8);
+        	-fx-background-radius: 20 20 4 20;
         """);
     } else {
         bubble.setStyle("""
-            -fx-background-color: #1a1d2e;
-            -fx-background-radius: 20 20 20 4;
+            -fx-background-color: #1e293b;
+        	-fx-background-radius: 20 20 20 4;
         """);
     }
 
@@ -1721,34 +1873,95 @@ public class ChatWindow {
     // ===== P2P LISTENERS =====
     private void setupP2PListeners() {
     	 p2pManager.setEventListener(new P2PManager.P2PEventListener() {
-    	        @Override
-    	        public void onChatMessageReceived(Integer conversationId, Message message) {
-    	            Platform.runLater(() -> {
-                        // ✅ Hiển thị message nếu conversation đang mở
-                        if (currentConversation != null && 
-                            currentConversation.getId().equals(conversationId)) {
-                            displayMessage(message, false);
-                            
-                            // ✅ Nếu là file message, reload để đảm bảo hiển thị đúng format
-                            if (message.getMessageType() == Message.MessageType.FILE) {
-                                // Delay nhỏ để đảm bảo message đã được lưu vào DB
-                                new Thread(() -> {
-                                    try {
-                                        Thread.sleep(100); // Đợi 100ms để DB commit
-                                        Platform.runLater(() -> {
-                                            if (currentConversation != null && 
-                                                currentConversation.getId().equals(conversationId)) {
-                                                reloadCurrentConversationMessages();
-                                            }
-                                        });
-                                    } catch (InterruptedException e) {
-                                        Thread.currentThread().interrupt();
-                                    }
-                                }).start();
-                            }
-                        }
-                    });
-    	        }
+//    	        @Override
+//    	        public void onChatMessageReceived(Integer conversationId, Message message) {
+//    	            Platform.runLater(() -> {
+//                        // ✅ Hiển thị message nếu conversation đang mở
+//                        if (currentConversation != null && 
+//                            currentConversation.getId().equals(conversationId)) {
+//                            displayMessage(message, false);
+//                            
+//                            // ✅ Nếu là file message, reload để đảm bảo hiển thị đúng format
+//                            if (message.getMessageType() == Message.MessageType.FILE) {
+//                                // Delay nhỏ để đảm bảo message đã được lưu vào DB
+//                                new Thread(() -> {
+//                                    try {
+//                                        Thread.sleep(100); // Đợi 100ms để DB commit
+//                                        Platform.runLater(() -> {
+//                                            if (currentConversation != null && 
+//                                                currentConversation.getId().equals(conversationId)) {
+//                                                reloadCurrentConversationMessages();
+//                                            }
+//                                        });
+//                                    } catch (InterruptedException e) {
+//                                        Thread.currentThread().interrupt();
+//                                    }
+//                                }).start();
+//                            }
+//                        }
+//                    });
+//    	        }
+    		 
+    		 @Override
+    		 public void onChatMessageReceived(Integer conversationId, Message message) {
+    		     // 🔹 Luôn vào JavaFX thread
+    		     Platform.runLater(() -> {
+
+    		         // 1️⃣ Chỉ xử lý nếu đang mở đúng conversation
+    		         if (currentConversation == null ||
+    		             !currentConversation.getId().equals(conversationId)) {
+    		             return;
+    		         }
+
+    		         // 2️⃣ Hiển thị message ngay lập tức
+    		         displayMessage(message, false);
+
+    		         // 3️⃣ FILE message → reload để gắn FileAttachment chuẩn từ DB
+    		         if (message.getMessageType() == Message.MessageType.FILE) {
+
+    		             // FILE không có smart reply
+    		             new Thread(() -> {
+    		                 try {
+    		                     Thread.sleep(100); // chờ DB commit
+    		                 } catch (InterruptedException e) {
+    		                     Thread.currentThread().interrupt();
+    		                 }
+
+    		                 Platform.runLater(() -> {
+    		                     if (currentConversation != null &&
+    		                         currentConversation.getId().equals(conversationId)) {
+    		                         reloadCurrentConversationMessages();
+    		                     }
+    		                 });
+    		             }, "file-message-reload").start();
+
+    		             return;
+    		         }
+
+    		         // 4️⃣ TEXT message → Smart Reply
+    		         SmartReplyController smartReplyController =
+    		                 chatController.getSmartReplyController();
+
+    		         if (!smartReplyController.shouldShowSuggestions(message)) {
+    		             return;
+    		         }
+
+    		         smartReplyController.generateSuggestionsAsync(
+    		             message,
+    		             suggestions -> {
+    		                 if (suggestions == null || suggestions.isEmpty()) return;
+
+    		                 Platform.runLater(() -> {
+    		                     if (currentConversation != null &&
+    		                         currentConversation.getId().equals(conversationId)) {
+    		                         showSmartReplySuggestions(suggestions);
+    		                     }
+    		                 });
+    		             }
+    		         );
+    		     });
+    		 }
+
 
     	        @Override
     	        public void onTypingReceived(Integer conversationId, Integer userId) {
@@ -2245,8 +2458,21 @@ private void reloadCurrentConversationMessages() {
     }
     
     private void showEmojiPicker() {
-        showAlert("Feature", "Emoji picker - Coming soon");
+        ContextMenu menu = new ContextMenu();
+
+        String[] emojis = {"😀","😂","😍","👍","🙏","😢","😡","🔥"};
+
+        for (String e : emojis) {
+            MenuItem item = new MenuItem(e);
+            item.setOnAction(ev ->
+                messageInput.appendText(e)
+            );
+            menu.getItems().add(item);
+        }
+
+        menu.show(messageInput, Side.TOP, 0, 0);
     }
+
 
     private void handleVoiceCall() {
     	 if (currentConversation == null) {
@@ -2637,6 +2863,15 @@ private class AudioCallDialog extends Stage {
         messageArea.getChildren().add(openBtn);
     }
 
+    public interface ChatUICallback {
+        void onNewIncomingMessage(Message msg);
+    }
+
+    private ChatUICallback uiCallback;
+
+    public void setChatUICallback(ChatUICallback cb) {
+        this.uiCallback = cb;
+    }
 
     
     private void updateTimer() {

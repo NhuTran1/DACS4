@@ -508,7 +508,6 @@ public class MessageService {
     }
 
 
-
     // Stats class
     public static class MessageStats {
         public long textCount;

@@ -55,6 +55,16 @@ public class FileTransferController {
         void onError(String fileId, String error);
     }
     
+    public interface IncomingMessageCallback {
+        void onNewMessage(Message message);
+    }
+
+    private IncomingMessageCallback incomingMessageCallback;
+
+    public void setIncomingMessageCallback(IncomingMessageCallback cb) {
+        this.incomingMessageCallback = cb;
+    }
+
     // Context for tracking file transfers
     private static class FileTransferContext {
         String fileId;
@@ -323,6 +333,11 @@ public class FileTransferController {
                     notifyError(fileId, "Failed to create file message");
                     return;
                 }
+
+                chatController.handleIncomingMessage(
+                        context.conversationId,
+                        msg
+                );
 
                 System.out.println("✅ File received successfully: " + context.fileName);
                 notifyComplete(fileId, fileObj, false);

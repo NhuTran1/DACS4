@@ -244,6 +244,39 @@
     -fx-animation: file-pulse 1.5s infinite;
 }
 
+/* ===== LEFT TAB PANE ===== */
+.tab-pane {
+    -fx-background-color: #0a0e27;
+}
+
+.tab-pane .tab-header-area {
+    -fx-padding: 0;
+    -fx-background-color: #1e3a8a;
+}
+
+.tab-pane .tab {
+    -fx-background-color: #1e3a8a;
+    -fx-alignment: CENTER;
+    -fx-font-weight: bold;
+}
+
+.tab-pane .tab:hover {
+    -fx-background-color: #2563eb;
+}
+
+.tab-pane .tab:selected {
+    -fx-background-color: #3b82f6;
+}
+
+.tab-pane .tab-label {
+    -fx-text-fill: #93c5fd;
+    -fx-font-size: 14px;
+}
+
+.tab-pane .tab:selected .tab-label {
+    -fx-text-fill: white;
+}
+
 
 /* Animations */
 @keyframes pulse {
